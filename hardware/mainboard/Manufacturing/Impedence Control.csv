@@ -1,0 +1,4 @@
+﻿Item #,Impedance Type,Signal Layer,Reference Layer,Trace Width (mm),Trace Spacing (mm),Required Impedance (Ω),Notes
+1,Differential,L4,L3,0.277,0.2917,"90Ω ± 10 % differential, 45Ω ± 10 % single-ended ",USB2.0
+2,Differential,L1,L2,0.272,0.7,"100 Ω ± 5% differential,  50 Ω ± 10% single-ended",HDMI
+3,Co-planar Waveguide,L1,L2,0.377396,~,50 Ω ± 10%,RF
