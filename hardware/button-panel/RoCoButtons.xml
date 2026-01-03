@@ -1,0 +1,403 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export version="E">
+  <design>
+    <source>C:\Users\Nathan Myers\Documents\_Precision Metrics\KiCad\Board\RoCo Button Panel\RoCoButtons\RoCoButtons.kicad_sch</source>
+    <date>2026-01-03T15:31:43-0500</date>
+    <tool>Eeschema 9.0.0</tool>
+    <sheet number="1" name="/" tstamps="/">
+      <title_block>
+        <title/>
+        <company/>
+        <rev/>
+        <date/>
+        <source>RoCoButtons.kicad_sch</source>
+        <comment number="1" value=""/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+  </design>
+  <components>
+    <comp ref="J1">
+      <value>504050-0691</value>
+      <footprint>SamacSys_Parts:5040500691</footprint>
+      <datasheet>https://www.molex.com/content/dam/molex/molex-dot-com/products/automated/en-us/salesdrawingpdf/504/504050/5040500691_sd.pdf?inline</datasheet>
+      <description>Pico-Lock SMT Wire-to-Board Header 6 way Molex Pico-Lock Series, Series Number 504050, 1.5mm Pitch 6 Way 1 Row Shrouded Right Angle PCB Header, Surface Mount</description>
+      <fields>
+        <field name="Height">2.15</field>
+        <field name="Mouser Part Number">538-504050-0691</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Molex/504050-0691?qs=bvCPb%252BE7ys2K1LQC9e%2FvRg%3D%3D</field>
+        <field name="Manufacturer_Name">Molex</field>
+        <field name="Manufacturer_Part_Number">504050-0691</field>
+        <field name="Price for one"/>
+        <field name="Distributer Link"/>
+        <field name="Part Number"/>
+        <field name="Footprint">SamacSys_Parts:5040500691</field>
+        <field name="Datasheet">https://www.molex.com/content/dam/molex/molex-dot-com/products/automated/en-us/salesdrawingpdf/504/504050/5040500691_sd.pdf?inline</field>
+        <field name="Description">Pico-Lock SMT Wire-to-Board Header 6 way Molex Pico-Lock Series, Series Number 504050, 1.5mm Pitch 6 Way 1 Row Shrouded Right Angle PCB Header, Surface Mount</field>
+      </fields>
+      <libsource lib="SamacSys_Parts" part="504050-0691" description="Pico-Lock SMT Wire-to-Board Header 6 way Molex Pico-Lock Series, Series Number 504050, 1.5mm Pitch 6 Way 1 Row Shrouded Right Angle PCB Header, Surface Mount"/>
+      <property name="Height" value="2.15"/>
+      <property name="Mouser Part Number" value="538-504050-0691"/>
+      <property name="Mouser Price/Stock" value="https://www.mouser.co.uk/ProductDetail/Molex/504050-0691?qs=bvCPb%252BE7ys2K1LQC9e%2FvRg%3D%3D"/>
+      <property name="Manufacturer_Name" value="Molex"/>
+      <property name="Manufacturer_Part_Number" value="504050-0691"/>
+      <property name="Price for one" value=""/>
+      <property name="Distributer Link" value=""/>
+      <property name="Part Number" value=""/>
+      <property name="Sheetname" value="Root"/>
+      <property name="Sheetfile" value="RoCoButtons.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>a47637c8-e2f1-498e-ae70-85d2b464f969</tstamps>
+    </comp>
+    <comp ref="S1">
+      <value>EVQ-Q2U03W</value>
+      <footprint>SamacSys_Parts:EVQQ2</footprint>
+      <datasheet>https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</datasheet>
+      <description>PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</description>
+      <fields>
+        <field name="Height"/>
+        <field name="Mouser Part Number">667-EVQ-Q2U03W</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D</field>
+        <field name="Manufacturer_Name">Panasonic</field>
+        <field name="Manufacturer_Part_Number">EVQ-Q2U03W</field>
+        <field name="Price for one"/>
+        <field name="Distributer Link"/>
+        <field name="Part Number"/>
+        <field name="Footprint">SamacSys_Parts:EVQQ2</field>
+        <field name="Datasheet">https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</field>
+        <field name="Description">PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</field>
+      </fields>
+      <libsource lib="SamacSys_Parts" part="EVQ-Q2U03W" description="PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD"/>
+      <property name="Height" value=""/>
+      <property name="Mouser Part Number" value="667-EVQ-Q2U03W"/>
+      <property name="Mouser Price/Stock" value="https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D"/>
+      <property name="Manufacturer_Name" value="Panasonic"/>
+      <property name="Manufacturer_Part_Number" value="EVQ-Q2U03W"/>
+      <property name="Price for one" value=""/>
+      <property name="Distributer Link" value=""/>
+      <property name="Part Number" value=""/>
+      <property name="Sheetname" value="Root"/>
+      <property name="Sheetfile" value="RoCoButtons.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>038c4d01-6655-403f-8356-6e9ae6a856bd</tstamps>
+    </comp>
+    <comp ref="S2">
+      <value>EVQ-Q2U03W</value>
+      <footprint>SamacSys_Parts:EVQQ2</footprint>
+      <datasheet>https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</datasheet>
+      <description>PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</description>
+      <fields>
+        <field name="Height"/>
+        <field name="Mouser Part Number">667-EVQ-Q2U03W</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D</field>
+        <field name="Manufacturer_Name">Panasonic</field>
+        <field name="Manufacturer_Part_Number">EVQ-Q2U03W</field>
+        <field name="Price for one"/>
+        <field name="Distributer Link"/>
+        <field name="Part Number"/>
+        <field name="Footprint">SamacSys_Parts:EVQQ2</field>
+        <field name="Datasheet">https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</field>
+        <field name="Description">PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</field>
+      </fields>
+      <libsource lib="SamacSys_Parts" part="EVQ-Q2U03W" description="PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD"/>
+      <property name="Height" value=""/>
+      <property name="Mouser Part Number" value="667-EVQ-Q2U03W"/>
+      <property name="Mouser Price/Stock" value="https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D"/>
+      <property name="Manufacturer_Name" value="Panasonic"/>
+      <property name="Manufacturer_Part_Number" value="EVQ-Q2U03W"/>
+      <property name="Price for one" value=""/>
+      <property name="Distributer Link" value=""/>
+      <property name="Part Number" value=""/>
+      <property name="Sheetname" value="Root"/>
+      <property name="Sheetfile" value="RoCoButtons.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>a319c712-372e-4374-8a49-621ad3b44f31</tstamps>
+    </comp>
+    <comp ref="S3">
+      <value>EVQ-Q2U03W</value>
+      <footprint>SamacSys_Parts:EVQQ2</footprint>
+      <datasheet>https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</datasheet>
+      <description>PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</description>
+      <fields>
+        <field name="Height"/>
+        <field name="Mouser Part Number">667-EVQ-Q2U03W</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D</field>
+        <field name="Manufacturer_Name">Panasonic</field>
+        <field name="Manufacturer_Part_Number">EVQ-Q2U03W</field>
+        <field name="Price for one"/>
+        <field name="Distributer Link"/>
+        <field name="Part Number"/>
+        <field name="Footprint">SamacSys_Parts:EVQQ2</field>
+        <field name="Datasheet">https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</field>
+        <field name="Description">PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</field>
+      </fields>
+      <libsource lib="SamacSys_Parts" part="EVQ-Q2U03W" description="PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD"/>
+      <property name="Height" value=""/>
+      <property name="Mouser Part Number" value="667-EVQ-Q2U03W"/>
+      <property name="Mouser Price/Stock" value="https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D"/>
+      <property name="Manufacturer_Name" value="Panasonic"/>
+      <property name="Manufacturer_Part_Number" value="EVQ-Q2U03W"/>
+      <property name="Price for one" value=""/>
+      <property name="Distributer Link" value=""/>
+      <property name="Part Number" value=""/>
+      <property name="Sheetname" value="Root"/>
+      <property name="Sheetfile" value="RoCoButtons.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>6584390b-45d7-4e58-b5f3-f341bb5fba1b</tstamps>
+    </comp>
+    <comp ref="S4">
+      <value>EVQ-Q2U03W</value>
+      <footprint>SamacSys_Parts:EVQQ2</footprint>
+      <datasheet>https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</datasheet>
+      <description>PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</description>
+      <fields>
+        <field name="Height"/>
+        <field name="Mouser Part Number">667-EVQ-Q2U03W</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D</field>
+        <field name="Manufacturer_Name">Panasonic</field>
+        <field name="Manufacturer_Part_Number">EVQ-Q2U03W</field>
+        <field name="Price for one"/>
+        <field name="Distributer Link"/>
+        <field name="Part Number"/>
+        <field name="Footprint">SamacSys_Parts:EVQQ2</field>
+        <field name="Datasheet">https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</field>
+        <field name="Description">PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</field>
+      </fields>
+      <libsource lib="SamacSys_Parts" part="EVQ-Q2U03W" description="PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD"/>
+      <property name="Height" value=""/>
+      <property name="Mouser Part Number" value="667-EVQ-Q2U03W"/>
+      <property name="Mouser Price/Stock" value="https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D"/>
+      <property name="Manufacturer_Name" value="Panasonic"/>
+      <property name="Manufacturer_Part_Number" value="EVQ-Q2U03W"/>
+      <property name="Price for one" value=""/>
+      <property name="Distributer Link" value=""/>
+      <property name="Part Number" value=""/>
+      <property name="Sheetname" value="Root"/>
+      <property name="Sheetfile" value="RoCoButtons.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>c0c511ec-5849-45bc-ae7f-2d6bfab72f99</tstamps>
+    </comp>
+    <comp ref="S5">
+      <value>EVQ-Q2U03W</value>
+      <footprint>SamacSys_Parts:EVQQ2</footprint>
+      <datasheet>https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</datasheet>
+      <description>PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</description>
+      <fields>
+        <field name="Height"/>
+        <field name="Mouser Part Number">667-EVQ-Q2U03W</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D</field>
+        <field name="Manufacturer_Name">Panasonic</field>
+        <field name="Manufacturer_Part_Number">EVQ-Q2U03W</field>
+        <field name="Price for one"/>
+        <field name="Distributer Link"/>
+        <field name="Part Number"/>
+        <field name="Footprint">SamacSys_Parts:EVQQ2</field>
+        <field name="Datasheet">https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</field>
+        <field name="Description">PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</field>
+      </fields>
+      <libsource lib="SamacSys_Parts" part="EVQ-Q2U03W" description="PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD"/>
+      <property name="Height" value=""/>
+      <property name="Mouser Part Number" value="667-EVQ-Q2U03W"/>
+      <property name="Mouser Price/Stock" value="https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D"/>
+      <property name="Manufacturer_Name" value="Panasonic"/>
+      <property name="Manufacturer_Part_Number" value="EVQ-Q2U03W"/>
+      <property name="Price for one" value=""/>
+      <property name="Distributer Link" value=""/>
+      <property name="Part Number" value=""/>
+      <property name="Sheetname" value="Root"/>
+      <property name="Sheetfile" value="RoCoButtons.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>25eaa2a4-b3ba-4740-88f3-5c7f01eef6df</tstamps>
+    </comp>
+    <comp ref="S6">
+      <value>EVQ-Q2U03W</value>
+      <footprint>SamacSys_Parts:EVQQ2</footprint>
+      <datasheet>https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</datasheet>
+      <description>PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</description>
+      <fields>
+        <field name="Height"/>
+        <field name="Mouser Part Number">667-EVQ-Q2U03W</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D</field>
+        <field name="Manufacturer_Name">Panasonic</field>
+        <field name="Manufacturer_Part_Number">EVQ-Q2U03W</field>
+        <field name="Price for one"/>
+        <field name="Distributer Link"/>
+        <field name="Part Number"/>
+        <field name="Footprint">SamacSys_Parts:EVQQ2</field>
+        <field name="Datasheet">https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</field>
+        <field name="Description">PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</field>
+      </fields>
+      <libsource lib="SamacSys_Parts" part="EVQ-Q2U03W" description="PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD"/>
+      <property name="Height" value=""/>
+      <property name="Mouser Part Number" value="667-EVQ-Q2U03W"/>
+      <property name="Mouser Price/Stock" value="https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D"/>
+      <property name="Manufacturer_Name" value="Panasonic"/>
+      <property name="Manufacturer_Part_Number" value="EVQ-Q2U03W"/>
+      <property name="Price for one" value=""/>
+      <property name="Distributer Link" value=""/>
+      <property name="Part Number" value=""/>
+      <property name="Sheetname" value="Root"/>
+      <property name="Sheetfile" value="RoCoButtons.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>d318a5db-bedb-493d-9857-7111fce0673e</tstamps>
+    </comp>
+  </components>
+  <libparts>
+    <libpart lib="Mechanical" part="Fiducial">
+      <description>Fiducial Marker</description>
+      <docs>~</docs>
+      <footprints>
+        <fp>Fiducial*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">FID</field>
+        <field name="Value">Fiducial</field>
+        <field name="Footprint"/>
+        <field name="Datasheet">~</field>
+        <field name="Description">Fiducial Marker</field>
+      </fields>
+    </libpart>
+    <libpart lib="Mechanical" part="MountingHole">
+      <description>Mounting Hole without connection</description>
+      <docs>~</docs>
+      <footprints>
+        <fp>MountingHole*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">H</field>
+        <field name="Value">MountingHole</field>
+        <field name="Footprint"/>
+        <field name="Datasheet">~</field>
+        <field name="Description">Mounting Hole without connection</field>
+      </fields>
+    </libpart>
+    <libpart lib="Mechanical" part="MountingHole_Pad">
+      <description>Mounting Hole with connection</description>
+      <docs>~</docs>
+      <footprints>
+        <fp>MountingHole*Pad*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">H</field>
+        <field name="Value">MountingHole_Pad</field>
+        <field name="Footprint"/>
+        <field name="Datasheet">~</field>
+        <field name="Description">Mounting Hole with connection</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="input"/>
+      </pins>
+    </libpart>
+    <libpart lib="SamacSys_Parts" part="504050-0691">
+      <description>Pico-Lock SMT Wire-to-Board Header 6 way Molex Pico-Lock Series, Series Number 504050, 1.5mm Pitch 6 Way 1 Row Shrouded Right Angle PCB Header, Surface Mount</description>
+      <docs>https://www.molex.com/content/dam/molex/molex-dot-com/products/automated/en-us/salesdrawingpdf/504/504050/5040500691_sd.pdf?inline</docs>
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">504050-0691</field>
+        <field name="Footprint">5040500691</field>
+        <field name="Datasheet">https://www.molex.com/content/dam/molex/molex-dot-com/products/automated/en-us/salesdrawingpdf/504/504050/5040500691_sd.pdf?inline</field>
+        <field name="Description">Pico-Lock SMT Wire-to-Board Header 6 way Molex Pico-Lock Series, Series Number 504050, 1.5mm Pitch 6 Way 1 Row Shrouded Right Angle PCB Header, Surface Mount</field>
+        <field name="Height">2.15</field>
+        <field name="Mouser Part Number">538-504050-0691</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Molex/504050-0691?qs=bvCPb%252BE7ys2K1LQC9e%2FvRg%3D%3D</field>
+        <field name="Manufacturer_Name">Molex</field>
+        <field name="Manufacturer_Part_Number">504050-0691</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+        <pin num="2" name="2" type="passive"/>
+        <pin num="3" name="3" type="passive"/>
+        <pin num="4" name="4" type="passive"/>
+        <pin num="5" name="5" type="passive"/>
+        <pin num="6" name="6" type="passive"/>
+        <pin num="7" name="MP_1" type="passive"/>
+        <pin num="8" name="MP_2" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="SamacSys_Parts" part="EVQ-Q2U03W">
+      <description>PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</description>
+      <docs>https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</docs>
+      <fields>
+        <field name="Reference">S</field>
+        <field name="Value">EVQ-Q2U03W</field>
+        <field name="Footprint">EVQQ2</field>
+        <field name="Datasheet">https://industrial.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_6s_th.pdf</field>
+        <field name="Description">PANASONIC ELECTRONIC COMPONENTS - EVQ-Q2U03W - SWITCH, TACTILE, SPST-NO, 20mA, 15VDC, SMD</field>
+        <field name="Height"/>
+        <field name="Mouser Part Number">667-EVQ-Q2U03W</field>
+        <field name="Mouser Price/Stock">https://www.mouser.co.uk/ProductDetail/Panasonic/EVQ-Q2U03W?qs=Ow%252BOiPmaljGxrjo7HIkVDQ%3D%3D</field>
+        <field name="Manufacturer_Name">Panasonic</field>
+        <field name="Manufacturer_Part_Number">EVQ-Q2U03W</field>
+      </fields>
+      <pins>
+        <pin num="1" name="A" type="passive"/>
+        <pin num="2" name="B" type="passive"/>
+        <pin num="3" name="B'" type="passive"/>
+        <pin num="4" name="A'" type="passive"/>
+      </pins>
+    </libpart>
+  </libparts>
+  <libraries>
+    <library logical="Mechanical">
+      <uri>C:\Program Files\KiCad\9.0\share\kicad\symbols\/Mechanical.kicad_sym</uri>
+    </library>
+    <library logical="SamacSys_Parts">
+      <uri>C:/Users/Nathan Myers/AppData/Roaming/kicad/9.0/SamacSys_Parts.kicad_sym</uri>
+    </library>
+  </libraries>
+  <nets>
+    <net code="1" name="/SW_1" class="Default">
+      <node ref="J1" pin="1" pinfunction="1" pintype="passive"/>
+      <node ref="S1" pin="1" pinfunction="A" pintype="passive"/>
+      <node ref="S1" pin="4" pinfunction="A'" pintype="passive"/>
+    </net>
+    <net code="2" name="/SW_2" class="Default">
+      <node ref="J1" pin="2" pinfunction="2" pintype="passive"/>
+      <node ref="S2" pin="1" pinfunction="A" pintype="passive"/>
+      <node ref="S2" pin="4" pinfunction="A'" pintype="passive"/>
+    </net>
+    <net code="3" name="/SW_3" class="Default">
+      <node ref="J1" pin="3" pinfunction="3" pintype="passive"/>
+      <node ref="S3" pin="1" pinfunction="A" pintype="passive"/>
+      <node ref="S3" pin="4" pinfunction="A'" pintype="passive"/>
+    </net>
+    <net code="4" name="/SW_4" class="Default">
+      <node ref="J1" pin="4" pinfunction="4" pintype="passive"/>
+      <node ref="S4" pin="1" pinfunction="A" pintype="passive"/>
+      <node ref="S4" pin="4" pinfunction="A'" pintype="passive"/>
+    </net>
+    <net code="5" name="/SW_5" class="Default">
+      <node ref="J1" pin="5" pinfunction="5" pintype="passive"/>
+      <node ref="S5" pin="1" pinfunction="A" pintype="passive"/>
+      <node ref="S5" pin="4" pinfunction="A'" pintype="passive"/>
+    </net>
+    <net code="6" name="/SW_6" class="Default">
+      <node ref="J1" pin="6" pinfunction="6" pintype="passive"/>
+      <node ref="S6" pin="1" pinfunction="A" pintype="passive"/>
+      <node ref="S6" pin="4" pinfunction="A'" pintype="passive"/>
+    </net>
+    <net code="7" name="GND" class="Default">
+      <node ref="J1" pin="7" pinfunction="MP_1" pintype="passive"/>
+      <node ref="J1" pin="8" pinfunction="MP_2" pintype="passive"/>
+      <node ref="S1" pin="2" pinfunction="B" pintype="passive"/>
+      <node ref="S1" pin="3" pinfunction="B'" pintype="passive"/>
+      <node ref="S2" pin="2" pinfunction="B" pintype="passive"/>
+      <node ref="S2" pin="3" pinfunction="B'" pintype="passive"/>
+      <node ref="S3" pin="2" pinfunction="B" pintype="passive"/>
+      <node ref="S3" pin="3" pinfunction="B'" pintype="passive"/>
+      <node ref="S4" pin="2" pinfunction="B" pintype="passive"/>
+      <node ref="S4" pin="3" pinfunction="B'" pintype="passive"/>
+      <node ref="S5" pin="2" pinfunction="B" pintype="passive"/>
+      <node ref="S5" pin="3" pinfunction="B'" pintype="passive"/>
+      <node ref="S6" pin="2" pinfunction="B" pintype="passive"/>
+      <node ref="S6" pin="3" pinfunction="B'" pintype="passive"/>
+    </net>
+  </nets>
+</export>
