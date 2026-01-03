@@ -36936,6 +36936,18 @@
 			(justify bottom)
 		)
 	)
+	(gr_text "fix usb impedance (coplanar single ended JLC)"
+		(at 158.65 51.5 0)
+		(layer "F.SilkS")
+		(uuid "696d60db-c4d2-48de-acc8-2c3813f359c6")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+			(justify left bottom)
+		)
+	)
 	(gr_text "CHGIN"
 		(at 200.4 69.9 0)
 		(layer "F.SilkS")
