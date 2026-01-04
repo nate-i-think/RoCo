@@ -1,0 +1,4 @@
+cd .\display-testing\
+cross build --target armv7-unknown-linux-gnueabihf
+scp .\target\armv7-unknown-linux-gnueabihf\debug\display-testing nathan@coxkit-1.local:/home/nathan/cox-kit-dev/
+ssh nathan@coxkit-1.local

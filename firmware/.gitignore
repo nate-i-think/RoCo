@@ -1,0 +1,7 @@
+# Compiled Binaries
+/target
+
+# Enviroment Variables and Secrets
+.env
+*.key
+*.pem
