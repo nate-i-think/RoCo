@@ -1,0 +1,42 @@
+# configuration variables
+WSL_DISTRO := "Ubuntu"
+TARGET := "aarch64-unknown-linux-gnu"
+# TARGET := "armv7-unknown-linux-gnueabihf"   <--- Old 32-bit format for Pi Zero
+
+# pi configuration variables
+REMOTE := "nathan@roco-1.local"
+REMOTE_PATH := "/home/nathan/builds/"
+BINARY_NAME := "RoCo"
+
+default:
+	@just --list
+
+run-wsl *ARGS:
+	wsl -d {{WSL_DISTRO}} -- bash -lc "cd \"\$(wslpath -a '{{justfile_directory()}}')\" && {{ARGS}}"
+
+check:
+	just run-wsl "cargo check"
+
+build:
+	just run-wsl "cargo build --target {{TARGET}}"
+
+build-release:
+	just run-wsl "cargo build --release --target {{TARGET}}"
+
+clean:
+	just run-wsl "cargo clean"
+
+send: 
+	just run-wsl "scp ./target/{{TARGET}}/debug/{{BINARY_NAME}} {{REMOTE}}:{{REMOTE_PATH}}{{BINARY_NAME}}"
+
+remote-chmod:
+	just run-wsl "ssh {{REMOTE}} 'cd {{REMOTE_PATH}} && chmod +x {{BINARY_NAME}}'"
+
+ssh:
+	wsl -d Ubuntu -- ssh -t {{REMOTE}} "cd /home/nathan/builds && bash"
+
+deploy:
+	build
+	send
+	chmod-remote
+	ssh

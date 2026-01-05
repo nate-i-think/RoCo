@@ -1,6 +1,6 @@
 use std::fs::{OpenOptions, File};
 use std::io::{self, BufRead, Write, Seek, SeekFrom};
-use crate::graphics::{self, BufferedRD, Color, BufErr};
+use crate::graphics::{BufferedRD, Color, BufErr};
 
 pub struct Display {
     buf: Vec<u8>,
@@ -10,9 +10,9 @@ pub struct Display {
 impl Display {
     pub fn new() -> Result<Self, io::Error> {
         const BYTES_PER_PIXEL: usize = 2;
-        let mut buf: Vec<u8> = vec![0xFF; Self::WIDTH * Self::HEIGHT * BYTES_PER_PIXEL];
+        let buf: Vec<u8> = vec![0xFF; Self::WIDTH * Self::HEIGHT * BYTES_PER_PIXEL];
         const FB_PATH: &str = "/dev/fb0";
-        let mut fb = OpenOptions::new().write(true).open(FB_PATH)?;
+        let fb = OpenOptions::new().write(true).open(FB_PATH)?;
 
         Ok(Self {
             buf: buf,
@@ -23,20 +23,6 @@ impl Display {
     /// Consumes the buffer and closes its file reference.
     pub fn drop(buf: Self) {
         drop(buf)
-    }
-}
-
-use libc;
-const FBIO_WAITFORVSYNC: libc::c_ulong = 0x40044620;
-
-/// Waits for the vertical sync signal on the given file descriptor.
-fn wait_for_vsync(fd: i32) -> io::Result<()> {
-    let mut dummy: u32 = 0;
-    let ret = unsafe { libc::ioctl(fd, FBIO_WAITFORVSYNC, &mut dummy) };
-    if ret < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
     }
 }
 
@@ -63,14 +49,8 @@ impl BufferedRD for Display {
     }
 
     fn update(&mut self) {
-        // Wait for vertical sync.
-        use std::os::unix::io::AsRawFd;
-        if let Err(e) = wait_for_vsync(self.fb_file.as_raw_fd()) {
-            eprintln!("Failed to wait for vsync: {}", e);
-        }
-
-        self.fb_file.seek(SeekFrom::Start(0));
-        self.fb_file.write_all(&self.buf);
+        self.fb_file.seek(SeekFrom::Start(0)).unwrap();
+        self.fb_file.write_all(&self.buf).unwrap();
     }
 
     fn clear(&mut self) {

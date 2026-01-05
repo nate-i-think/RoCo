@@ -1,8 +1,8 @@
 use std::sync::mpsc::Receiver;
 use std::{time::Duration};
 use std::ops::{Add, Sub, Mul, Div};
-use tokio::io::{Error, ErrorKind, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
-use chrono::{DateTime, Local};
+use tokio::io::{Error, ErrorKind, AsyncWriteExt, WriteHalf};
+use chrono::Local;
 use tokio_serial::SerialStream;
 
 use crate::ubx::{self, ConfigItem, ConfigKey, ConfigValue, UBX};
@@ -32,7 +32,7 @@ pub async fn begin_survey_in(
         ],
     }.build_ubx().bytes();
 
-    serial_writer.write_all(&survey_in_frame).await;
+    serial_writer.write_all(&survey_in_frame).await?;
 
     println!("[begin_survey_in] Started Survey In, which will complete at [{}]", 
         (Local::now() + 
@@ -51,7 +51,7 @@ pub async fn fetch_survey_in_update(
 ) -> tokio::io::Result<()> {
     let nav_svin_frame = ubx::UBXPoll::NAVSVIN.build_ubx().bytes();
 
-    serial_writer.write_all(&nav_svin_frame).await;
+    serial_writer.write_all(&nav_svin_frame).await?;
 
     let timeout = ubx_rx.recv_timeout(Duration::from_secs(1));
 
@@ -62,6 +62,7 @@ pub async fn fetch_survey_in_update(
             match data {
                 ubx::UBXData::NAVSVIN { itow_timestamp, duration, mean_x, mean_y, mean_z, mean_x_hp, mean_y_hp, mean_z_hp, mean_acc, observations_used, valid, active } => {
                     println!("\n[fetch_survey_in_update] Survey in update recieved:");
+                    println!("    ITOW:             {}", itow_timestamp);
                     println!("    observations:     {}", observations_used);
                     println!("    valid:            {}", valid);
                     println!("    active:           {}", active);

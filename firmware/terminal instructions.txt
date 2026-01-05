@@ -1,4 +1,14 @@
-cd .\display-testing\
+ # Native Using Cross
+
+cd .\RoCo
 cross build --target armv7-unknown-linux-gnueabihf
-scp .\target\armv7-unknown-linux-gnueabihf\debug\display-testing nathan@coxkit-1.local:/home/nathan/cox-kit-dev/
+scp .\target\armv7-unknown-linux-gnueabihf\debug\RoCo nathan@coxkit-1.local:/home/nathan/RoCo
+scp .\target\armv7-unknown-linux-gnueabihf\debug\RoCo nathan@roco-1.local:/home/nathan/RoCo
 ssh nathan@coxkit-1.local
+ssh nathan@roco-1.local
+
+
+ # or in Ubunto WSL2
+
+cd "/mnt/c/Users/Nathan Myers/Desktop/Rust Programs/RoCo"
+cargo build --target armv7-unknown-linux-gnueabihf

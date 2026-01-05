@@ -1,10 +1,7 @@
-use core::fmt;
 use std::sync::mpsc;
-use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
-use tokio_serial::{SerialPortBuilderExt, SerialStream};
-use std::io::{self};
+use tokio::io::{AsyncReadExt, ReadHalf};
+use tokio_serial::SerialStream;
 
 use thiserror::Error;
 
@@ -131,7 +128,6 @@ pub async fn receive_ubx_packets(
         AwaitingPayload,
         AwaitingChecksumA,
         AwaitingChecksumB,
-        Finished,
     }
 
     let mut state: ParseState = ParseState::AwaitingSync;
@@ -144,8 +140,8 @@ pub async fn receive_ubx_packets(
     let mut checksum: (u8, u8) = (0u8, 0u8);
 
     loop {
-        //! TODO: USE HARDWARE(/OS?) BUFFER TO DECREASE RETURNS TO THIS HANDLE.
-        //! Hardware buffer: 64 bits.
+        // TODO: USE HARDWARE(/OS?) BUFFER TO DECREASE RETURNS TO THIS HANDLE.
+        // Hardware buffer: 64 bits.
         //tokio::time::sleep(time::Duration::from_millis(10));
         let n = reader.read(&mut buffer).await?;
         if n == 0 {
@@ -238,7 +234,6 @@ pub async fn receive_ubx_packets(
                 if buffer_slice.len() == 0 { break; }
                 checksum.1 = buffer_slice[0];
                 buffer_slice = &buffer_slice[1..];
-                state = ParseState::Finished;
             }
 
             let tmp_payload = payload;
@@ -845,7 +840,7 @@ impl UBXData {
     fn cfg_valget_incoming(ubx: &UBX) -> ParseResult {
         let valid_size = ubx.payload.len() >= 9;
         const VALGET_INCOMING_VERSION: u8 = 0x01;
-        if (ubx.payload[0] != VALGET_INCOMING_VERSION) { 
+        if ubx.payload[0] != VALGET_INCOMING_VERSION { 
             return Err(UBXParseErr::InvalidPayload { 
                 payload_as_string: format!("Incoming version was invalid; version: {:02X?}, payload: {:?}", ubx.payload[0], ubx.payload)
             });
@@ -1134,7 +1129,7 @@ mod geodesy {
     
         let lambda = y.atan2(x); // Longitude
     
-        let mut p = (x * x + y * y).sqrt();
+        let p = (x * x + y * y).sqrt();
         let mut phi = (z / p).atan(); // Initial guess for latitude on sphere
         let mut phi_prev;
     

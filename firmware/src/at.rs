@@ -1,4 +1,4 @@
-use std::{str::Utf8Error, sync::mpsc};
+use std::sync::mpsc;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader, ReadHalf};
 use tokio_serial::SerialStream;
@@ -39,10 +39,10 @@ pub async fn recieve_at_data(
             if (new_line ^ b'\n').count_ones() == 1 {
                 println!("[recieve_at_data]: saw a single bit error.");
                 line_buf.push(b'\n');
-                tx.send(parse_at_line(line_buf));
+                tx.send(parse_at_line(line_buf)).unwrap();
             } else {
                 line_buf.push(new_line);
-                tx.send(AT::Invalid { msg: line_buf });
+                tx.send(AT::Invalid { msg: line_buf }).unwrap();
             }
 
             line_buf = Vec::new();
@@ -58,10 +58,10 @@ pub async fn recieve_at_data(
             line_buf.pop();
         }
         if line_buf.len() == 0 {
-            tx.send(AT::Empty);
+            tx.send(AT::Empty).unwrap();
             continue;
         }
-        tx.send(parse_at_line(line_buf));
+        tx.send(parse_at_line(line_buf)).unwrap();
         line_buf = Vec::new();
     }
 }
@@ -69,7 +69,7 @@ pub async fn recieve_at_data(
 fn parse_at_line(line: Vec<u8>) -> AT {
     let str = match std::str::from_utf8(&line) {
         Ok(s) => s,
-        Err(e) => return AT::Invalid { msg: line },
+        Err(_) => return AT::Invalid { msg: line },
     };
 
     match str {
