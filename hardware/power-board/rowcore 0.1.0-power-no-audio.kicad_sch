@@ -8893,7 +8893,7 @@
 	)
 	(text "USB-C (Power/Data)"
 		(exclude_from_sim no)
-		(at 16.51 60.706 0)
+		(at 12.192 60.452 0)
 		(effects
 			(font
 				(size 2.54 2.54)
