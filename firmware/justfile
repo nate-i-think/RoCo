@@ -40,6 +40,9 @@ remote-chmod:
 ssh:
 	wsl -d Ubuntu -- ssh -t {{REMOTE}} "cd /home/nathan/builds && bash"
 
+send-data:
+	just run-wsl "scp -r ./data {{REMOTE}}:{{REMOTE_PATH}}"
+
 auth:
 	# Ensure WSL has an SSH key (creates one if missing)
 	just run-wsl "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -a 100 -f ~/.ssh/id_ed25519 -N ''"
@@ -49,6 +52,7 @@ auth:
 deploy:
 	just build
 	just send
+	just send-data
 	just remote-chmod
 	just ssh
 

@@ -20,10 +20,16 @@ thiserror = "2.0.17"
 drm = { version = "0.14.1" }
 # Provides enums for every FourCC code.
 drm-fourcc = "2.2.0"
+# Memory mapped buffers.
+memmap2 = "0.9.9"
+# Bindings to the various *nix system functions. We just need `ioctl` for the display interface.
+nix = { version = "0.30.1", features = ["ioctl"] }
 # Rust bitflags!
 bitflags = "2.10.0"
 # Dates and times.
 chrono = "0.4"
+# Font rendering.
+ab_glyph = "0.2.32"
 
 # Provides interactive command-line input for debug
 # rustyline = "11.0.0"
