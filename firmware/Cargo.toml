@@ -18,6 +18,8 @@ tokio-i2c = "0.2.0"
 thiserror = "2.0.17"
 # Interface to the Direct Rendering Manager subsystem. 
 drm = { version = "0.14.1" }
+# Provides enums for every FourCC code.
+drm-fourcc = "2.2.0"
 # Rust bitflags!
 bitflags = "2.10.0"
 # Dates and times.

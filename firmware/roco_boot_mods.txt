@@ -1,0 +1,115 @@
+# Below is a list of the boot modifcations made to the RoCo such that it has a splash screen and boots quickly.
+
+(1) Add to /boot/firmware/config.txt:
+```
+# [RoCo]: Switch to external antenna:
+dtparam=ant2
+
+# [RoCo]: Configure Framebuffer fb0:
+framebuffer_width=800
+framebuffer_height=480
+
+# [RoCo]: Force HDMI Configuration:
+hdmi_force_hotplug=1
+disable_overscan=1
+
+hdmi_group=2
+hdmi_mode=87
+hdmi_cvt=800 480 60 6 0 0 0
+
+# [RoCo]: Disable Rainbow Splash:
+disable_splash=1
+
+# [RoCo]: Enable Display GPIO
+# display VGH_EN
+gpio=11=op,dh
+# display AVDD_EN
+gpio=16=op,dh
+# display PWM_EN
+gpio=17=op,dh
+# display PWM_SIG
+gpio=12=op,dh
+# display reset
+gpio=9=op,dh
+```
+
+(2) Change in /boot/firmware/config.txt:
+```
+camera_auto_detect=1
+display_auto_detect=1
+dtoverlay=vc4-kms-v3d
+```
+To:
+```
+# [RoCo]: Disable
+camera_auto_detect=0
+# [Roco]: Disable
+display_auto_detect=0
+# [Roco]: Disable
+# dtoverlay=vc4-kms-v3d
+```
+
+(3) Add to the end of /boot/firmware/cmdline.txt (MUST ALL BE ON ONE LINE):
+```
+rootwait quiet loglevel=0 vt.global_cursor_default=0 splash
+```
+
+(4) Create /usr/bin/bootsplash:
+```
+sudo nano /usr/bin/bootsplash
+```
+
+Paste in:
+```
+#!/bin/sh
+cat /proc/cmdline | grep splash || exit 0
+
+clear
+
+# draw splash
+/usr/bin/fbi -T 1 -noverbose -a /boot/firmware/splash.png </dev/tty1 >/dev/null 2>&1
+```
+
+Exit, and adjust chmod:
+```
+sudo chmod +x /usr/bin/bootsplash
+```
+
+(4) Install fbi:
+```
+sudo apt-get update && sudo apt-get install -y fbi
+```
+
+(5) Create /etc/systemd/system/bootsplash.service:
+```
+sudo nano /etc/systemd/system/bootsplash.service
+```
+
+Paste in:
+```
+[Unit]
+Description=boot splash
+[Service]
+ExecStart=/usr/bin/bootsplash
+[Install]
+WantedBy=local-fs.target
+```
+
+Then exit, and run:
+```
+sudo systemctl daemon-reload && sudo systemctl enable bootsplash
+```
+
+(6) Provide splash image
+On your main machine, send over with SSH (vary this command accordingly):
+```
+scp ./splash.png nathan@roco-3.local:/home/nathan
+or if on wsl
+scp  "/mnt/c/Users/Nathan Myers/Desktop/Rust Programs/RoCo/img/splash.png" nathan@roco-5.local:/home/nathan
+
+```
+Then back on the pi:
+```
+sudo mv /home/nathan/splash.png /boot/firmware/splash.png
+```
+

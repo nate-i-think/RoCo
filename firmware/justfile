@@ -4,9 +4,11 @@ TARGET := "aarch64-unknown-linux-gnu"
 # TARGET := "armv7-unknown-linux-gnueabihf"   <--- Old 32-bit format for Pi Zero
 
 # pi configuration variables
-REMOTE := "nathan@roco-1.local"
+REMOTE := "nathan@roco-5.local"
 REMOTE_PATH := "/home/nathan/builds/"
 BINARY_NAME := "RoCo"
+
+# MAIN COMMANDS:
 
 default:
 	@just --list
@@ -29,14 +31,28 @@ clean:
 send: 
 	just run-wsl "scp ./target/{{TARGET}}/debug/{{BINARY_NAME}} {{REMOTE}}:{{REMOTE_PATH}}{{BINARY_NAME}}"
 
+send-to *ARGS:
+	just run-wsl "scp ./target/{{TARGET}}/debug/{{BINARY_NAME}} {{ARGS}}:{{REMOTE_PATH}}{{BINARY_NAME}}"
+
 remote-chmod:
 	just run-wsl "ssh {{REMOTE}} 'cd {{REMOTE_PATH}} && chmod +x {{BINARY_NAME}}'"
 
 ssh:
 	wsl -d Ubuntu -- ssh -t {{REMOTE}} "cd /home/nathan/builds && bash"
 
+auth:
+	# Ensure WSL has an SSH key (creates one if missing)
+	just run-wsl "test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -a 100 -f ~/.ssh/id_ed25519 -N ''"
+	# Copy the public key to the remote host (prompts for password once)
+	just run-wsl "command -v ssh-copy-id >/dev/null 2>&1 && ssh-copy-id -i ~/.ssh/id_ed25519.pub {{REMOTE}} || (cat ~/.ssh/id_ed25519.pub | ssh {{REMOTE}} 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys')"
+
 deploy:
-	build
-	send
-	chmod-remote
-	ssh
+	just build
+	just send
+	just remote-chmod
+	just ssh
+
+# FUN COMMANDS:
+
+loc: 
+	tokei

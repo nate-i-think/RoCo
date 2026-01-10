@@ -9,6 +9,7 @@ dependencies = [
  "bitflags 2.10.0",
  "chrono",
  "drm",
+ "drm-fourcc",
  "rppal",
  "thiserror 2.0.17",
  "tokio 1.49.0",
