@@ -302,10 +302,21 @@ pub enum UBXParseErr {
 /// Represents the types of UBX messages that can be polled.
 #[derive(Debug)]
 pub enum UBXPoll {
+    MONRF,
+
+    NAVSTATUS,
+    NAVDOP,
+    NAVSIG,
+    NAVSAT,
     NAVPOSECEF,
     NAVPOSLLH,
     NAVPVT,
     NAVSVIN,
+    NAVRELPOSNED,
+
+    RXMRTCM,
+
+    SECSIG,
 
     CFGVALGET {
         layer: cfg::CfgLayer,
@@ -327,10 +338,22 @@ impl UBXPoll {
     /// - Returns: `(u8, u8)` which represents `(class, id)`
     pub const fn get_id_and_class(&self) -> (u8, u8) {
         match self {
+            Self::MONRF =>            (0x0A, 0x38),
+
+            Self::NAVSTATUS =>        (0x01, 0x03),
+            Self::NAVDOP =>           (0x01, 0x04),
+            Self::NAVSIG =>           (0x01, 0x43),
+            Self::NAVSAT =>           (0x01, 0x35),
             Self::NAVPOSECEF =>       (0x01, 0x01),
             Self::NAVPOSLLH =>        (0x01, 0x02),
             Self::NAVPVT =>           (0x01, 0x07),
             Self::NAVSVIN =>          (0x01, 0x3B),
+            Self::NAVRELPOSNED =>     (0x01, 0x3C),
+
+            Self::RXMRTCM =>          (0x02, 0x32),
+
+            Self::SECSIG =>           (0x27, 0x09),
+
 
             Self::CFGVALGET { .. } => (0x06, 0x8B),
             Self::CFGVALSET { .. } => (0x06, 0x8A),
@@ -442,14 +465,14 @@ impl UBXPoll {
 #[derive(Debug)]
 pub enum UBXData {
     /// Message acknoweldged (Output).
-    UBXACKACK {
+    ACKACK {
         /// Class ID of the Acknowledged Message.
         class_id: u8,
         /// Message ID of the Acknowledged Message.
         message_id: u8,
     },
 
-    UBXACKNAK {
+    ACKNAK {
         /// Class ID of the Not-Acknowledged Message.
         class_id: u8,
         /// Message ID of the Not-Acknowledged Message.
@@ -590,7 +613,7 @@ pub enum UBXData {
         verti_acc: u32,
     },
 
-    /// High precision geodetic position solution
+    /// High precision geodetic position solution.
     ///
     /// ### Field units:
     /// - `itow_timestamp`: ms
@@ -832,13 +855,13 @@ impl UBXData {
         }
 
         match ubx.class {
-            0x01 => Self::nav_packet(ubx),
-            0x02 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // RXM
+            0x01 => Self::nav_packet(ubx),                           // NAV
+            0x02 => Self::rxm_packet(ubx),                           // RXM
             0x04 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // INF
-            0x05 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // ACK
-            0x06 => Self::cfg_packet(ubx),
+            0x05 => Self::ack_packet(ubx),                           // ACK
+            0x06 => Self::cfg_packet(ubx),                           // CFG
             0x09 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // UPD
-            0x0A => Err(UBXParseErr::UnimplementedClass(ubx.class)), // MON
+            0x0A => Self::mon_packet(ubx),                           // MON
             0x0D => Err(UBXParseErr::UnimplementedClass(ubx.class)), // TIM
             0x13 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // MGA
             0x21 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // LOG
@@ -861,52 +884,91 @@ impl UBXData {
         match ubx.id {
             0x01 => nav::parse_posecef(ubx),
             0x02 => nav::parse_posllh(ubx),
+            0x03 => nav::parse_status(ubx),
+            0x04 => nav::parse_dop(ubx),
             0x07 => nav::parse_pvt(ubx),
+            0x14 => nav::parse_hpposllh(ubx),
+            0x35 => nav::parse_sat(ubx),
             0x3B => nav::parse_svin(ubx),
+            0x3C => nav::parse_relposned(ubx),
+            0x43 => nav::parse_sig(ubx),
             _ => Err(UBXParseErr::UnsupportedID(ubx.id)),
+        }
+    }
+
+    fn ack_packet(ubx: &UBX) -> ParseResult {
+        match ubx.id {
+            0x00 => ack::parse_nak(ubx),
+            0x01 => ack::parse_ack(ubx),
+            _ => Err(UBXParseErr::UnsupportedID(ubx.id))
         }
     }
 
     fn cfg_packet(ubx: &UBX) -> ParseResult {
         match ubx.id {
-            0x8B => Self::cfg_valget_incoming(ubx),
+            0x8B => cfg::cfg_valget_incoming(ubx),
             _ => Err(UBXParseErr::UnsupportedID(ubx.id)),
         }   
     }
 
-    fn cfg_valget_incoming(ubx: &UBX) -> ParseResult {
-        let valid_size = ubx.payload.len() >= 9;
-        const VALGET_INCOMING_VERSION: u8 = 0x01;
-        if ubx.payload[0] != VALGET_INCOMING_VERSION { 
-            return Err(UBXParseErr::InvalidPayload { 
-                payload_as_string: format!("Incoming version was invalid; version: {:02X?}, payload: {:?}", ubx.payload[0], ubx.payload)
-            });
-        }
-        Ok(UBXData::CFGVALGET { 
-            origin_layer: match cfg::CfgLayer::try_from(ubx.payload[1]) {
-                Ok(layer) => layer,
-                Err(e) => return Err(UBXParseErr::InvalidPayload { payload_as_string: 
-                    format!("Incoming layer was invalid; layer: {:02X?}, payload: {:?}", ubx.payload[1], ubx.payload)
-                }),
-            },
-            position: u16::from_be_bytes([ubx.payload[3], ubx.payload[4]]),
-            data: cfg::ConfigItem::parse_config_data(&ubx.payload)? 
-        })
+    fn mon_packet(ubx: &UBX) -> ParseResult {
+        match ubx.id {
+            0x38 => mon::parse_rf(ubx),
+            _ => Err(UBXParseErr::UnsupportedID(ubx.id)),
+        }   
+    }
+
+    fn rxm_packet(ubx: &UBX) -> ParseResult {
+        match ubx.id {
+            0x32 => rxm::parse_rtcm(ubx),
+            _ => Err(UBXParseErr::UnsupportedID(ubx.id)),
+        }   
+    }
+
+    fn sec_packet(ubx: &UBX) -> ParseResult {
+        match ubx.id {
+            0x09 => sec::parse_sig(ubx),
+            _ => Err(UBXParseErr::UnsupportedID(ubx.id)),
+        }   
     }
 }
 
-/// A simple module which handles and processes UBX-ACK-XXXX
-/// messages. This class of messages only contains `UBX-ACK-ACK`
-/// and `UBX-ACK-NAK`.
+/// A simple module which handles and processes UBX-ACK-XXXX messages,
+/// the messages in the UBX-ACK class are used to indicate
+/// acknowledgement or rejection of input messages (e.g. UBX-CFG).
 pub mod ack {
+    use super::{ParseResult, UBXData, UBX};
 
+    pub fn parse_ack(ubx: &UBX) -> ParseResult {
+        const EXPECTED_PAYLOAD_SIZE: usize = 2;
+        UBXData::verify_payload_size(ubx, EXPECTED_PAYLOAD_SIZE)?;
+
+        let p = &ubx.payload;
+
+        Ok(UBXData::ACKACK {
+            class_id: p[0],
+            message_id: p[1],
+        })
+    }
+
+    pub fn parse_nak(ubx: &UBX) -> ParseResult {
+        const EXPECTED_PAYLOAD_SIZE: usize = 2;
+        UBXData::verify_payload_size(ubx, EXPECTED_PAYLOAD_SIZE)?;
+
+        let p = &ubx.payload;
+
+        Ok(UBXData::ACKNAK {
+            class_id: p[0],
+            message_id: p[1],
+        })
+    }
 }
 
 /// A module which handles and processes UBX-CFG-XXXX messages.
 /// Seperated for organization purposes because this codebase
 /// is enormous.
 pub mod cfg {
-    use super::UBXParseErr;
+    use super::{UBXParseErr, ParseResult, UBXData, UBX};
 
     #[repr(u8)]
     #[derive(Debug, Clone, Copy)]
@@ -1164,6 +1226,26 @@ pub mod cfg {
             }
         }
     }
+
+    pub fn cfg_valget_incoming(ubx: &UBX) -> ParseResult {
+        let valid_size = ubx.payload.len() >= 9;
+        const VALGET_INCOMING_VERSION: u8 = 0x01;
+        if ubx.payload[0] != VALGET_INCOMING_VERSION { 
+            return Err(UBXParseErr::InvalidPayload { 
+                payload_as_string: format!("Incoming version was invalid; version: {:02X?}, payload: {:?}", ubx.payload[0], ubx.payload)
+            });
+        }
+        Ok(UBXData::CFGVALGET { 
+            origin_layer: match CfgLayer::try_from(ubx.payload[1]) {
+                Ok(layer) => layer,
+                Err(e) => return Err(UBXParseErr::InvalidPayload { payload_as_string: 
+                    format!("Incoming layer was invalid; layer: {:02X?}, payload: {:?}", ubx.payload[1], ubx.payload)
+                }),
+            },
+            position: u16::from_be_bytes([ubx.payload[3], ubx.payload[4]]),
+            data: ConfigItem::parse_config_data(&ubx.payload)? 
+        })
+    }
 }
 
 /// A module which handles and processes UBX-MON-XXXX messages,
@@ -1175,7 +1257,7 @@ pub mod mon {
 
     use super::{UBX, ParseResult, UBXData};
 
-    pub fn mon_rf(ubx: &UBX) -> ParseResult {
+    pub fn parse_rf(ubx: &UBX) -> ParseResult {
         let p: &Vec<u8> = &ubx.payload;
 
         let version = p[0];
@@ -2003,7 +2085,7 @@ pub mod rxm {
 
     use super::{ParseResult, UBXData, UBX};
 
-    pub fn rxm_rtcm(ubx: &UBX) -> ParseResult {
+    pub fn parse_rtcm(ubx: &UBX) -> ParseResult {
         const EXPECTED_PAYLOAD_SIZE: usize = 8;
         UBXData::verify_payload_size(ubx, EXPECTED_PAYLOAD_SIZE)?;
 
@@ -2042,7 +2124,7 @@ pub mod sec {
 
     use super::{ParseResult, UBXData, UBX};
 
-    pub fn sec_sig(ubx: &UBX) -> ParseResult {
+    pub fn parse_sig(ubx: &UBX) -> ParseResult {
         let p = &ubx.payload;
 
         // Need at least the fixed header to read jam_num_cent_freqs.
