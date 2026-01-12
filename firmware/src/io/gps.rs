@@ -7,7 +7,7 @@ use tokio::sync::watch;
 use tokio::time::sleep;
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
 
-use crate::io::ubx::{self, ConfigItem, ConfigKey, ConfigValue, UBX};
+use crate::io::ubx::{self, cfg::{ConfigItem, ConfigKey, ConfigValue}, UBX};
 
 pub async fn begin_survey_in(
     serial_writer: &mut WriteHalf<SerialStream>, 
@@ -160,7 +160,7 @@ impl Div<f64> for Distance {
 #[derive(Clone, Debug)]
 pub struct GNSSFix {
     pub rtk_enabled: bool,
-    pub fix_status: ubx::GNSSFixType,
+    pub fix_status: ubx::nav::GNSSFixType,
     pub unix_ms: u64,
     pub lat_deg: f64,
     pub lon_deg: f64,
@@ -174,7 +174,7 @@ impl Default for GNSSFix {
     fn default() -> Self {
         Self {
             rtk_enabled: false,
-            fix_status: ubx::GNSSFixType::NoFix,
+            fix_status: ubx::nav::GNSSFixType::NoFix,
             unix_ms: 0,
             lat_deg: 0.0,
             lon_deg: 0.0,
