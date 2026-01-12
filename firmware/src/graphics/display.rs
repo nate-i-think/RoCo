@@ -280,6 +280,11 @@ impl KMSDisplay {
     pub fn swap(&mut self) {
         std::mem::swap(&mut self.front, &mut self.back);
     }
+
+    pub fn copy_front_to_back(&mut self) {
+        assert_eq!(self.front.map.len(), self.back.map.len());
+        self.back.map.copy_from_slice(&self.front.map);
+    }
 }
 
 /// Fast unsafe buffer clear.

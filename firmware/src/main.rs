@@ -25,12 +25,13 @@ async fn main() {
     let atlas = init_text();
 
     clear_xrgb8888(&mut display.back.map, display.back.pitch, 800, 480, color::WHITE);
+    clear_xrgb8888(&mut display.front.map, display.front.pitch, 800, 480, color::WHITE);
 
     let mut debug_terminal = DebugTerminal::init(
-        Rect { left: 100, top: 100, width: 600, height: 200}, 
+        Rect { left: 0, top: 0, width: 800, height: 480}, 
         &atlas, 
-        20, 
-        6
+        14, 
+        4
     ).unwrap();
 
     let fb_data = FrameBufferData {
@@ -54,6 +55,7 @@ async fn main() {
         wait_for_pageflip(&display.device).await;
         // Swap front/back roles
         display.swap();
+        display.copy_front_to_back();
 
         // Throttle to ~20 Hz
         sleep(Duration::from_millis(10)).await;
@@ -75,7 +77,7 @@ fn init_text() -> FontAtlas {
     FontAtlas::load_or_build_cached(
         font_name,
         graphics::text::ROBOTO_MONO_REGULAR,
-        24,                       // px
+        16,                       // px
         &charset,
         Path::new("./data/glyphs"),
         512, 512,                 // atlas size

@@ -114,17 +114,17 @@ impl<'a> DebugTerminal<'a> {
 
     #[inline(always)]
     fn format_message(message: &UILogLine) -> ColoredText {
+        let mut text: ColoredText = ColoredText::new();
         let bracket_color = match message.level {
-            Level::INFO => color::GRAY_20,
+            Level::INFO => color::GRAY_70,
             Level::DEBUG => color::GREEN,
-            Level::ERROR => color::RED,
+            Level::ERROR => { text.push("! ", color::RED); color::RED}, 
             Level::TRACE => color::CYAN,
             Level::WARN => color::ORANGE
         };
-        let mut text: ColoredText = ColoredText::new();
         text.push("[", bracket_color);
         text.push(message.target, color::string_to_xrgb8888(message.target));
-        text.push("]", bracket_color);
+        text.push("] ", bracket_color);
         text.push(&message.message, color::WHITE);
         text
     }

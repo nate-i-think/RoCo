@@ -4,7 +4,7 @@ TARGET := "aarch64-unknown-linux-gnu"
 # TARGET := "armv7-unknown-linux-gnueabihf"   <--- Old 32-bit format for Pi Zero
 
 # pi configuration variables
-REMOTE := "nathan@roco-5.local"
+REMOTE := "nathan@192.168.5.52"
 REMOTE_PATH := "/home/nathan/builds/"
 BINARY_NAME := "RoCo"
 
