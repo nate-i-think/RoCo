@@ -337,3 +337,25 @@ pub async fn wait_for_pageflip(dev: &AsyncFd<Card>) {
         }
     }
 }
+
+/// XRGB8888 framebuffer view (1 u32 per pixel).
+/// `pitch_bytes` is the stride in *bytes* between rows.
+pub struct FrameBufferData {
+    pub pitch_bytes: usize,
+    /// Width in pixels.
+    pub width: usize,
+    /// Height in pixels.
+    pub height: usize,
+}
+
+impl FrameBufferData {
+    pub fn new(pitch_bytes: usize, width: usize, height: usize) -> Self {
+        debug_assert!(pitch_bytes % 4 == 0, "XRGB8888 pitch must be 4-byte aligned");
+        Self {pitch_bytes, width, height }
+    }
+
+    #[inline]
+    pub fn words_per_row(&self) -> usize {
+        self.pitch_bytes / 4
+    }
+}

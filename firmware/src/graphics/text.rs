@@ -4,8 +4,15 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use crate::graphics::display::FrameBufferData;
+
 /// Compile-time embedded font bytes.
-/// Path is relative to your crate root.
+/// Path is relative to project root.
+pub static ROBOTO_REGULAR: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/.compile_time_data/Roboto-Regular.ttf"
+));
+
 pub static ROBOTO_MONO_REGULAR: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/.compile_time_data/RobotoMono-Regular.ttf"
@@ -701,7 +708,7 @@ fn read_glyph_entry(data: &[u8], cur: &mut usize) -> Result<GlyphEntryDisk, Atla
 }
 
 /// Rect fill helper
-pub fn draw_rect_xrgb8888(
+fn draw_rect_xrgb8888(
     buf: &mut [u8],
     pitch: usize,
     w: usize,
@@ -726,4 +733,114 @@ pub fn draw_rect_xrgb8888(
         };
         row[x0..x1].fill(color);
     }
+}
+
+
+// -------------------------------------------------------------------------------------------------
+// ColoredText: draw multi-colored strings as a sequence of spans.
+// -------------------------------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Default)]
+pub struct ColoredText {
+    spans: Vec<ColoredSpan>,
+}
+
+#[derive(Clone, Debug)]
+struct ColoredSpan {
+    text: String,
+    color: u32, // 0x00RRGGBB
+}
+
+impl ColoredText {
+    #[inline]
+    pub fn new() -> Self {
+        Self { spans: Vec::new() }
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.spans.clear();
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.spans.is_empty()
+    }
+
+    /// Append `text` with `color` (0x00RRGGBB).
+    /// Coalesces with the previous span if the color matches.
+    #[inline]
+    pub fn push(&mut self, text: impl AsRef<str>, color: u32) {
+        let s = text.as_ref();
+        if s.is_empty() {
+            return;
+        }
+
+        if let Some(last) = self.spans.last_mut() {
+            if last.color == color {
+                last.text.push_str(s);
+                return;
+            }
+        }
+
+        self.spans.push(ColoredSpan {
+            text: s.to_owned(),
+            color,
+        });
+    }
+
+    /// Total advance (in pixels) for all spans, using this atlas's cached metrics.
+    #[inline]
+    pub fn width_px(&self, atlas: &FontAtlas) -> i32 {
+        let mut w = 0i32;
+        for span in &self.spans {
+            w += advance_px(atlas, &span.text);
+        }
+        w
+    }
+
+    /// Draw multi-colored text at `(x, baseline_y)`, advancing the pen as each span is drawn.
+    /// Colors are 0x00RRGGBB and are alpha-blended over the existing framebuffer pixels.
+    #[inline]
+    pub fn draw_blend_xrgb8888(
+        &self,
+        atlas: &FontAtlas,
+        fb: &mut [u8],
+        fb_data: &FrameBufferData,
+        x: isize,
+        baseline_y: isize,
+    ) {
+        let mut pen_x = x;
+        for span in &self.spans {
+            atlas.draw_text_blend_xrgb8888(
+                fb,
+                fb_data.pitch_bytes,
+                fb_data.width,
+                fb_data.height,
+                pen_x,
+                baseline_y,
+                span.color,
+                &span.text,
+            );
+            pen_x += advance_px(atlas, &span.text) as isize;
+        }
+    }
+}
+
+#[inline(always)]
+fn advance_px(atlas: &FontAtlas, text: &str) -> i32 {
+    let mut pen_x = 0i32;
+
+    for ch in text.chars() {
+        let info = atlas.lookup(ch);
+        // Mirror draw_* fallback behavior: if missing, try '?'
+        let info = if info.rect.w == 0 && info.advance_x == 0 {
+            atlas.lookup('?')
+        } else {
+            info
+        };
+        pen_x += info.advance_x as i32;
+    }
+
+    pen_x
 }

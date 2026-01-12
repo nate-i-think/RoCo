@@ -5,7 +5,7 @@ use tokio::io::{Error, ErrorKind, AsyncWriteExt, WriteHalf};
 use chrono::Local;
 use tokio_serial::SerialStream;
 
-use crate::ubx::{self, ConfigItem, ConfigKey, ConfigValue, UBX};
+use crate::io::ubx::{self, ConfigItem, ConfigKey, ConfigValue, UBX};
 
 pub async fn begin_survey_in(
     serial_writer: &mut WriteHalf<SerialStream>, 
