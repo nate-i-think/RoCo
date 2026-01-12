@@ -118,9 +118,9 @@ impl<'a> DebugTerminal<'a> {
         let bracket_color = match message.level {
             Level::INFO => color::GRAY_70,
             Level::DEBUG => color::GREEN,
-            Level::ERROR => { text.push("! ", color::RED); color::RED}, 
             Level::TRACE => color::CYAN,
-            Level::WARN => color::ORANGE
+            Level::ERROR => { text.push("! ", color::RED); color::RED}, 
+            Level::WARN => { text.push("! ", color::ORANGE); color::ORANGE },
         };
         text.push("[", bracket_color);
         text.push(message.target, color::string_to_xrgb8888(message.target));
@@ -202,7 +202,6 @@ impl tracing::field::Visit for UiFieldVisitor {
         }
     }
 
-    // Optional: implement record_str/record_i64/etc if you want less quoting
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         if field.name() == "message" {
             self.message = Some(value.to_string());

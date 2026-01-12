@@ -108,7 +108,7 @@ impl UBX {
 /// 
 /// This function may get snagged for an indefinite period of time if an 
 /// invalid packet is sent with an unreasonably large `length` field, i.e.,
-/// 0xFF 0xFF, which is of course 65535 or u16::MAX. It would not stop
+/// 0xFFFF, which is of course 65535 or u16::MAX. It would not stop
 /// interpreting incoming data as payload data until it had recieved `length`
 /// bytes as input. A watchdog is thus recommended for unreliable connections.
 pub async fn receive_ubx_packets(
@@ -582,7 +582,7 @@ pub enum UBXData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GNSSFixType {
     NoFix,
     DeadReckoningOnly,
@@ -592,7 +592,7 @@ pub enum GNSSFixType {
     OnlyTimeFix,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PowerSaveModeState {
     NotActive,
     Enabled,
@@ -602,22 +602,39 @@ pub enum PowerSaveModeState {
     Inactive,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CarrierPhaseRangeSolutionStatus {
     NoSolution,
     SolutionWithFloatingAmbiguities,
     SolutionWithFixedAmbiguities,
 }
 
+/// OLD VERSION: UNSAFE — REMOVED B/C after thought a &[u8] only guaranteed 1-byte alignment.
+/// 
 /// Parses an array slice of little endian bytes into a number using that type's
 /// built in `from_le_bytes()`. Contains a compile-time check of the array slice's 
 /// size instead of a runtime check, using an `unsafe` block.
+// macro_rules! parse_to {
+//     ($slice:expr, $ty:ty) => {{
+//         const SIZE: usize = std::mem::size_of::<$ty>();
+//         debug_assert!($slice.len() == SIZE, "Slice length must match target type size");
+//         // SAFETY: The caller guarantees that the slice has the correct size.
+//         unsafe { <$ty>::from_le_bytes(*($slice.as_ptr() as *const [u8; SIZE])) }
+//     }};
+// }
+
+/// Parses an array slice of little endian bytes into a number using that type's
+/// built in `from_le_bytes()`.
 macro_rules! parse_to {
     ($slice:expr, $ty:ty) => {{
-        const SIZE: usize = std::mem::size_of::<$ty>();
-        debug_assert!($slice.len() == SIZE, "Slice length must match target type size");
-        // SAFETY: The caller guarantees that the slice has the correct size.
-        unsafe { <$ty>::from_le_bytes(*($slice.as_ptr() as *const [u8; SIZE])) }
+        const SIZE: usize = core::mem::size_of::<$ty>();
+        debug_assert!(
+            $slice.len() == SIZE,
+            "Slice length must match target type size"
+        );
+        let mut bytes = [0u8; SIZE];
+        bytes.copy_from_slice($slice);
+        <$ty>::from_le_bytes(bytes)
     }};
 }
 
@@ -905,7 +922,7 @@ impl ConfigItem {
             }};
         }
 
-        let mut config_items: Vec<ConfigItem>  = Vec::new();
+        let mut config_items: Vec<ConfigItem> = Vec::new();
         let data_len = data.len();
         let mut i: usize = 4;
         loop {

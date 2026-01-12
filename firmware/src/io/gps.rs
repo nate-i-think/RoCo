@@ -3,7 +3,9 @@ use std::{time::Duration};
 use std::ops::{Add, Sub, Mul, Div};
 use tokio::io::{Error, ErrorKind, AsyncWriteExt, WriteHalf};
 use chrono::Local;
-use tokio_serial::SerialStream;
+use tokio::sync::watch;
+use tokio::time::sleep;
+use tokio_serial::{SerialPortBuilderExt, SerialStream};
 
 use crate::io::ubx::{self, ConfigItem, ConfigKey, ConfigValue, UBX};
 
@@ -153,4 +155,76 @@ impl Mul<f64> for Distance {
 impl Div<f64> for Distance {
     type Output = Self;
     fn div(self, s: f64) -> Self { Distance(self.0 / s) }
+}
+
+#[derive(Clone, Debug)]
+pub struct GNSSFix {
+    pub rtk_enabled: bool,
+    pub fix_status: ubx::GNSSFixType,
+    pub unix_ms: u64,
+    pub lat_deg: f64,
+    pub lon_deg: f64,
+    pub speed_mps: f32,
+    pub heading_deg: f32,
+    pub horizontal_acc_mps: f32,
+    pub vertical_acc_mps: f32,
+}
+
+impl Default for GNSSFix {
+    fn default() -> Self {
+        Self {
+            rtk_enabled: false,
+            fix_status: ubx::GNSSFixType::NoFix,
+            unix_ms: 0,
+            lat_deg: 0.0,
+            lon_deg: 0.0,
+            speed_mps: 0.0,
+            heading_deg: 0.0,
+            horizontal_acc_mps: 0.0,
+            vertical_acc_mps: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GNSSFixHandle {
+    rx: watch::Receiver<GNSSFix>,
+}
+
+impl GNSSFixHandle {
+    pub fn subscribe(&self) -> watch::Receiver<GNSSFix> {
+        self.rx.clone()
+    }
+
+    pub fn latest(&self) -> GNSSFix {
+        self.rx.borrow().clone()
+    }
+}
+
+pub fn init_gnss_task() -> GNSSFixHandle {
+    let (tx, rx) = watch::channel(GNSSFix::default());
+
+    let port_name = "/dev/serial0"; // <--- CORRECT THIS 
+    let baud_rate =  38_400; 
+
+    let mut serial_port = tokio_serial::new(port_name, baud_rate)
+        .data_bits(tokio_serial::DataBits::Eight)
+        .flow_control(tokio_serial::FlowControl::None)
+        .parity(tokio_serial::Parity::None)
+        .stop_bits(tokio_serial::StopBits::One)
+        .timeout(Duration::from_secs(1))
+        .open_native_async()
+        .expect("The SerialStream should open, but failed:");
+
+    tokio::spawn(gnss_task(tx, serial_port));
+
+    GNSSFixHandle { 
+        rx
+    }
+}
+
+async fn gnss_task(tx: watch::Sender<GNSSFix>, mut serial_port: SerialStream) {
+    loop {
+        sleep(Duration::from_millis(1000)).await;
+    }
 }

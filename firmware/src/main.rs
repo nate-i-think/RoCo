@@ -41,6 +41,7 @@ async fn main() {
     };
 
     tokio::spawn(test());
+    tokio::spawn(test2());
 
     loop {
         let buf = &mut display.back.map[..];
@@ -66,8 +67,17 @@ async fn test() {
     let mut n = 0;
     loop {
         n += 1;
-        tracing::info!(target: "TEST", "test {}", n);
+        tracing::info!(target: "TestOne", "Test #{}", n);
         sleep(Duration::from_secs(1)).await;
+    }
+}
+
+async fn test2() {
+    let mut n = 0;
+    loop {
+        n += 1;
+        tracing::warn!(target: "AlternateTest", "Alternate Test {}.", n);
+        sleep(Duration::from_millis(1500)).await;
     }
 }
 
