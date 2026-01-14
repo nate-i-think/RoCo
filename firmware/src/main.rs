@@ -12,6 +12,7 @@ use crate::graphics::debug_terminal::DebugTerminal;
 use crate::graphics::display::{FrameBufferData, KMSDisplay, clear_xrgb8888, wait_for_pageflip};
 use crate::graphics::geometry::Rect;
 use crate::graphics::text::FontAtlas;
+use crate::io::{debug_gnss, gps};
 
 /// Main entrypoint. The tokio flavor is kept as `current_thread` as
 /// to confine the whole program to one thread for power efficiency
@@ -40,10 +41,27 @@ async fn main() {
         height: 480,
     };
 
-    tokio::spawn(test());
-    tokio::spawn(test2());
+    let fix_handle = gps::init_gnss_task().await;
 
     loop {
+
+        {
+            let pvt = &fix_handle.fix.borrow().nav_pvt;
+            tracing::info!(target: "Main", "NAV-PVTA: y: {}, m: {}, d: {}, h: {}, m: {}, s: {}, n: {}, acc: {}, valid: {}",
+                pvt.year, pvt.month, pvt.day, pvt.hour, pvt.min, pvt.sec, pvt.nano, pvt.time_acc, pvt.valid_date && pvt.valid_time
+            );
+            tracing::info!(target: "Main", "NAV-PVTB: fix type {:?}, num sats: {}, carrier sln: {:?}", 
+                pvt.fix_type, pvt.num_satellites_used, pvt.carrier_solution
+            );
+            tracing::info!(target: "Main", "NAV-PVTC: lat: {}, lon: {}, height: {}, speed: {}", 
+                pvt.latitude, pvt.longitude, pvt.height, pvt.ground_speed
+            );
+            tracing::info!(target: "Main", "NAV-PVTD: horiz acc: {}, verti_acc: {}, speed_acc: {}, pos dop: {}", 
+                pvt.horiz_acc, pvt.verti_acc, pvt.speed_acc, pvt.position_dop
+            );
+            debug_gnss::log_gnss_rf_debug(&fix_handle.fix.borrow());
+        }
+
         let buf = &mut display.back.map[..];
         let w = 800usize;
         let h = 480usize;
@@ -58,26 +76,8 @@ async fn main() {
         display.swap();
         display.copy_front_to_back();
 
-        // Throttle to ~20 Hz
-        sleep(Duration::from_millis(10)).await;
-    }
-}
-
-async fn test() {
-    let mut n = 0;
-    loop {
-        n += 1;
-        tracing::info!(target: "TestOne", "Test #{}", n);
-        sleep(Duration::from_secs(1)).await;
-    }
-}
-
-async fn test2() {
-    let mut n = 0;
-    loop {
-        n += 1;
-        tracing::warn!(target: "AlternateTest", "Alternate Test {}.", n);
-        sleep(Duration::from_millis(1500)).await;
+        // Throttle update rate.
+        sleep(Duration::from_millis(7500)).await;
     }
 }
 

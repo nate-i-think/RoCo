@@ -1,6 +1,10 @@
-use std::sync::mpsc;
-
-use tokio::io::{AsyncReadExt, ReadHalf};
+use std::sync::{
+    Arc, OnceLock, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use tokio::io::{ReadHalf, WriteHalf, AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{watch, mpsc, oneshot};
+use tokio::time::{Duration, timeout};
 use tokio_serial::SerialStream;
 
 use thiserror::Error;
@@ -102,160 +106,418 @@ impl UBX {
     }
 }
 
-/// An async producer of UBX packets. This will output packets indefinitely
-/// on the `tx` line until it is hung up. Packets may be invalid; check 
-/// validity with `packet.is_valid()`.
-/// 
-/// This function may get snagged for an indefinite period of time if an 
-/// invalid packet is sent with an unreasonably large `length` field, i.e.,
-/// 0xFFFF, which is of course 65535 or u16::MAX. It would not stop
-/// interpreting incoming data as payload data until it had recieved `length`
-/// bytes as input. A watchdog is thus recommended for unreliable connections.
-pub async fn receive_ubx_packets(
-    reader: &mut ReadHalf<SerialStream>,
-    tx: mpsc::Sender<UBX>,
-) -> std::io::Result<()> {
-    const BUFFER_SIZE: usize = 1024;
-    let mut buffer = vec![0u8; BUFFER_SIZE];
+#[derive(Debug)]
+pub enum UBXRequestError {
+    Io(std::io::Error),
+    Timeout { class: u8, id: u8, deadline: Duration },
+    HubClosed(&'static str),
+    WaiterDropped,
+}
 
-    #[derive(PartialEq)]
-    enum ParseState {
-        AwaitingSync,
-        AwaitingClass,
-        AwaitingID,
-        AwaitingLengthA,
-        AwaitingLengthB,
-        AwaitingPayload,
-        AwaitingChecksumA,
-        AwaitingChecksumB,
+impl From<std::io::Error> for UBXRequestError {
+    fn from(e: std::io::Error) -> Self { Self::Io(e) }
+}
+
+#[derive(Clone)]
+pub struct UBXHub {
+    inner: Arc<UBXHubInner>,
+}
+
+struct UBXHubInner {
+    // Hot table indexed by (class<<8 | id). Lazily initialized.
+    routes: Box<[OnceLock<RouteHandle>]>,
+    write_tx: mpsc::Sender<WriteRequest>,
+}
+
+struct RouteHandle {
+    latest_tx: watch::Sender<Option<Arc<UBXData>>>,
+    seq: AtomicU64,
+    waiters: Mutex<Vec<Waiter>>,
+}
+
+struct Waiter {
+    min_seq: u64,
+    tx: oneshot::Sender<Arc<UBXData>>,
+}
+
+struct WriteRequest {
+    frame: Arc<[u8]>,
+    resp: oneshot::Sender<std::io::Result<()>>,
+}
+
+#[derive(Clone)]
+pub struct UBXTopicHandle {
+    rx: watch::Receiver<Option<Arc<UBXData>>>,
+}
+
+impl UBXTopicHandle {
+    /// Subscribe to the same topic (cheap).
+    pub fn subscribe(&self) -> watch::Receiver<Option<Arc<UBXData>>> {
+        self.rx.clone()
     }
 
-    let mut state: ParseState = ParseState::AwaitingSync;
-    let mut sync_chars: (u8, u8) = (0u8, 0u8);
-    let mut class: u8 = 0u8;
-    let mut id: u8 = 0u8;
-    let mut length_a: u8 = 0u8; // The first byte of the length u16
-    let mut length: u16 = 0u16;
-    let mut payload: Vec<u8> = Vec::with_capacity(0);
-    let mut checksum: (u8, u8) = (0u8, 0u8);
+    /// Borrow the latest value (do not hold across `.await`).
+    pub fn borrow(&self) -> watch::Ref<'_, Option<Arc<UBXData>>> {
+        self.rx.borrow()
+    }
 
-    loop {
-        // TODO: USE HARDWARE(/OS?) BUFFER TO DECREASE RETURNS TO THIS HANDLE.
-        // Hardware buffer: 64 bits.
-        //tokio::time::sleep(time::Duration::from_millis(10));
-        let n = reader.read(&mut buffer).await?;
-        if n == 0 {
-            println!("[recieve_ubx_packets]: No more serial data to parse.");
-            return Ok(())
+    /// Clone the latest `Arc` (cheap). Safe to carry across `.await`.
+    pub fn latest(&self) -> Option<Arc<UBXData>> {
+        self.rx.borrow().clone()
+    }
+
+    /// Read via closure without cloning payload structs.
+    pub fn with_latest<R>(&self, f: impl FnOnce(Option<&UBXData>) -> R) -> R {
+        let v = self.rx.borrow();
+        f(v.as_deref())
+    }
+}
+
+impl RouteHandle {
+    fn new() -> Self {
+        let (latest_tx, _latest_rx) = watch::channel::<Option<Arc<UBXData>>>(None);
+        Self {
+            latest_tx,
+            seq: AtomicU64::new(0),
+            waiters: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn subscribe(&self) -> watch::Receiver<Option<Arc<UBXData>>> {
+        self.latest_tx.subscribe()
+    }
+
+    fn register_waiter(&self) -> oneshot::Receiver<Arc<UBXData>> {
+        let (tx, rx) = oneshot::channel();
+
+        // Critical section: prevents missing a message that arrives concurrently.
+        let mut waiters = self.waiters.lock().expect("waiters mutex poisoned");
+        let min_seq = self.seq.load(Ordering::Relaxed);
+        waiters.push(Waiter { min_seq, tx });
+        rx
+    }
+
+    fn publish_and_wake(&self, msg: Arc<UBXData>) {
+        // Update "latest" regardless of receivers.
+        let _old = self.latest_tx.send_replace(Some(msg.clone()));
+
+        // Increment sequence number for this key.
+        let new_seq = self.seq.fetch_add(1, Ordering::Relaxed) + 1;
+
+        // Wake waiters whose min_seq < new_seq.
+        let mut waiters = self.waiters.lock().expect("waiters mutex poisoned");
+        let mut i = 0;
+        while i < waiters.len() {
+            let should_wake = waiters[i].min_seq < new_seq;
+            if should_wake {
+                let waiter = waiters.swap_remove(i);
+                let _ = waiter.tx.send(msg.clone());
+                continue;
+            }
+            i += 1;
+        }
+    }
+}
+
+impl UBXHub {
+    /// Spawns the dedicated writer task and the reader+parser+router task.
+    pub fn spawn(reader: ReadHalf<SerialStream>, writer: WriteHalf<SerialStream>) -> Self {
+        // Writer queue is allowed to apply backpressure to *senders*,
+        // but it must never block the serial reader.
+        let (write_tx, write_rx) = mpsc::channel::<WriteRequest>(256);
+
+        let inner = Arc::new(UBXHubInner {
+            routes: (0..=u16::MAX).map(|_| OnceLock::new()).collect::<Vec<_>>().into_boxed_slice(),
+            write_tx,
+        });
+
+        // Spawn writer task.
+        tokio::spawn(Self::writer_task(writer, write_rx));
+
+        // Spawn reader+router task.
+        {
+            let inner_clone = inner.clone();
+            tokio::spawn(async move {
+                if let Err(e) = Self::receive_ubx_packets(reader, inner_clone).await {
+                    tracing::error!(target: "UBXHub", "Reader/router task exited with error: {}", e);
+                }
+            });
         }
 
-        let mut buffer_slice = &buffer[..n];
+        Self { inner }
+    }
+
+    /// Subscribe to the latest typed message for this UBXPoll topic.
+    pub fn topic(&self, poll: UBXPoll) -> UBXTopicHandle {
+        let (class, id) = poll.get_id_and_class();
+        let route = self.route_for(class, id);
+        UBXTopicHandle { rx: route.subscribe() }
+    }
+
+    /// Send a raw UBX frame through the dedicated writer task.
+    pub async fn send_frame_arc(&self, frame: Arc<[u8]>) -> Result<(), UBXRequestError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let req = WriteRequest { frame, resp: resp_tx };
+
+        self.inner.write_tx.send(req).await
+            .map_err(|_| UBXRequestError::HubClosed("writer task gone"))?;
+
+        resp_rx.await
+            .map_err(|_| UBXRequestError::HubClosed("writer response dropped"))?
+            .map_err(UBXRequestError::Io)
+    }
+
+    /// Convenience: send a poll request frame (builds UBX + bytes).
+    pub async fn send_poll(&self, poll: UBXPoll) -> Result<(), UBXRequestError> {
+        let bytes = poll.build_ubx().bytes();
+        self.send_frame_arc(Arc::<[u8]>::from(bytes)).await
+    }
+
+    /// Wait for the *next* arrival for `expected` (after registration), with timeout.
+    pub async fn wait_next(&self, expected: UBXPoll, deadline: Duration) -> Result<Arc<UBXData>, UBXRequestError> {
+        let (class, id) = expected.get_id_and_class();
+        let route = self.route_for(class, id);
+        let rx = route.register_waiter();
+
+        match timeout(deadline, rx).await {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(_)) => Err(UBXRequestError::WaiterDropped),
+            Err(_) => Err(UBXRequestError::Timeout { class, id, deadline }),
+        }
+    }
+
+    /// Register waiter → send frame → await next `expected` message.
+    pub async fn request(
+        &self,
+        frame: Arc<[u8]>,
+        expected: UBXPoll,
+        deadline: Duration,
+    ) -> Result<Arc<UBXData>, UBXRequestError> {
+        let (class, id) = expected.get_id_and_class();
+        let route = self.route_for(class, id);
+        let rx = route.register_waiter();
+
+        self.send_frame_arc(frame).await?;
+
+        match timeout(deadline, rx).await {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(_)) => Err(UBXRequestError::WaiterDropped),
+            Err(_) => Err(UBXRequestError::Timeout { class, id, deadline }),
+        }
+    }
+
+    fn route_for(&self, class: u8, id: u8) -> &RouteHandle {
+        let idx = ((class as usize) << 8) | (id as usize);
+        self.inner.routes[idx].get_or_init(RouteHandle::new)
+    }
+
+    async fn writer_task(
+        mut writer: WriteHalf<SerialStream>,
+        mut rx: mpsc::Receiver<WriteRequest>,
+    ) {
+        while let Some(req) = rx.recv().await {
+            let result = writer.write_all(&req.frame).await;
+            if result.is_err() {
+                let _ = req.resp.send(result);
+                tracing::error!(target: "UBXHubWriter", "Serial write failed; writer task exiting.");
+                return;
+            }
+            let _ = req.resp.send(result);
+        }
+    }
+
+    /// *The OG. Still standing. Wow. A little beaten, a little bruised, with new
+    /// fingers and new hair. But this guy has been kicking for a long time.*
+    /// 
+    /// An async producer of UBX packets. This will output packets indefinitely
+    /// on the `tx` line until it is hung up. Packets may be invalid; check 
+    /// validity with `packet.is_valid()`.
+    /// 
+    /// This function may get snagged for an indefinite period of time if an 
+    /// invalid packet is sent with an unreasonably large `length` field, i.e.,
+    /// 0xFFFF, which is of course 65535 or u16::MAX. It would not stop
+    /// interpreting incoming data as payload data until it had recieved `length`
+    /// bytes as input. A watchdog is thus recommended for unreliable connections.
+    async fn receive_ubx_packets(
+        mut reader: ReadHalf<SerialStream>,
+        inner: Arc<UBXHubInner>,
+    ) -> std::io::Result<()> {
+        // Safety guard against pathological length fields. ZED-F9P UBX payloads
+        // are typically nowhere near this, but max out at 2^16 bytes long, which
+        // would cause signficant issues.
+        const MAX_PAYLOAD_LEN: u16 = 16_384;
+        
+        const BUFFER_SIZE: usize = 1024;
+        let mut buffer = vec![0u8; BUFFER_SIZE];
+
+        #[derive(PartialEq)]
+        enum ParseState {
+            AwaitingSync,
+            AwaitingClass,
+            AwaitingID,
+            AwaitingLengthA,
+            AwaitingLengthB,
+            AwaitingPayload,
+            AwaitingChecksumA,
+            AwaitingChecksumB,
+        }
+
+        let mut state: ParseState = ParseState::AwaitingSync;
+        let mut sync_chars: (u8, u8) = (0u8, 0u8);
+        let mut class: u8 = 0u8;
+        let mut id: u8 = 0u8;
+        let mut length_a: u8 = 0u8; // The first byte of the length u16
+        let mut length: u16 = 0u16;
+        let mut payload: Vec<u8> = Vec::new();
+        let mut checksum: (u8, u8) = (0u8, 0u8);
 
         loop {
-            if state == ParseState::AwaitingSync {
-                const SYNC_CHAR_1: u8 = SYNC_CHARS.0;
-                const SYNC_CHAR_2: u8 = SYNC_CHARS.1;
-                let mut i = 0;
-                let mut flag = true;
-                while i < buffer_slice.len() && flag {
-                    match buffer_slice[i] {
-                        SYNC_CHAR_1 => {
-                            sync_chars.0 = SYNC_CHAR_1;
-                        },
-                        SYNC_CHAR_2 => {
-                            if sync_chars.0 == SYNC_CHAR_1 {
-                                sync_chars.1 = SYNC_CHAR_2;
-                                buffer_slice = &buffer_slice[(i + 1)..];
-                                state = ParseState::AwaitingClass;
-                                flag = false;
-                            }
-                        },
-                        _ => {
-                            sync_chars.0 = 0x00;
-                            sync_chars.1 = 0x00;
-                        },
-                    }
-                    i += 1;
-                }
-                if flag { break; }
-            }
-
-            if state == ParseState::AwaitingClass {
-                if buffer_slice.len() == 0 { break; }
-                class = buffer_slice[0];
-                buffer_slice = &buffer_slice[1..];
-                state = ParseState::AwaitingID
-            }
-
-            if state == ParseState::AwaitingID {
-                if buffer_slice.len() == 0 { break; }
-                id = buffer_slice[0];
-                buffer_slice = &buffer_slice[1..];
-                state = ParseState::AwaitingLengthA;
-            }
-
-            if state == ParseState::AwaitingLengthA {
-                if buffer_slice.len() == 0 { break; }
-                length_a = buffer_slice[0];
-                buffer_slice = &buffer_slice[1..];
-                state = ParseState::AwaitingLengthB;
-            }
-
-            if state == ParseState::AwaitingLengthB {
-                if buffer_slice.len() == 0 { break; }
-                length = u16::from_le_bytes([length_a, buffer_slice[0]]);
-                buffer_slice = &buffer_slice[1..];
-                state = ParseState::AwaitingPayload;
-
-                payload = Vec::with_capacity(length as usize);
-            }
-
-            if state == ParseState::AwaitingPayload {
-                if buffer_slice.len() == 0 { break; }
-                if payload.len() + buffer_slice.len()  < length.into() {
-                    payload.extend_from_slice(buffer_slice);
-                    break;
-                } else {
-                    let cutoff = length as usize - payload.len();
-                    payload.extend_from_slice(&buffer_slice[..cutoff]);
-                    buffer_slice = &buffer_slice[cutoff..];
-                    state = ParseState::AwaitingChecksumA;
-                }
-            }
-
-            if state == ParseState::AwaitingChecksumA {
-                if buffer_slice.len() == 0 { break; }
-                checksum.0 = buffer_slice[0];
-                buffer_slice = &buffer_slice[1..];
-                state = ParseState::AwaitingChecksumB;
-            }
-
-            if state == ParseState::AwaitingChecksumB {
-                if buffer_slice.len() == 0 { break; }
-                checksum.1 = buffer_slice[0];
-                buffer_slice = &buffer_slice[1..];
-            }
-
-            let tmp_payload = payload;
-            let ubx = UBX {
-                sync_chars: sync_chars.clone(),
-                class: class,
-                id: id,
-                len: length,
-                payload: tmp_payload,
-                checksum: checksum.clone(),
-            };
-
-            if tx.send(ubx).is_err() {
-                println!("[recieve_ubx_packets]: Consumer dropped, stopping producer.");
+            // TODO: USE HARDWARE(/OS?) BUFFER TO DECREASE RETURNS TO THIS HANDLE.
+            // Hardware buffer: 64 bits.
+            //tokio::time::sleep(time::Duration::from_millis(10));
+            let n = reader.read(&mut buffer).await?;
+            if n == 0 {
+                println!("[recieve_ubx_packets]: No more serial data to parse.");
                 return Ok(())
             }
 
-            state = ParseState::AwaitingSync;
-            sync_chars = (0u8, 0u8);
-            payload = Vec::with_capacity(0);            
+            let mut buffer_slice = &buffer[..n];
 
-            if buffer_slice.len() == 0 { break; }
+            loop {
+                if state == ParseState::AwaitingSync {
+                    const SYNC_CHAR_1: u8 = SYNC_CHARS.0;
+                    const SYNC_CHAR_2: u8 = SYNC_CHARS.1;
+                    let mut i = 0;
+                    let mut flag = true;
+                    while i < buffer_slice.len() && flag {
+                        match buffer_slice[i] {
+                            SYNC_CHAR_1 => {
+                                sync_chars.0 = SYNC_CHAR_1;
+                            },
+                            SYNC_CHAR_2 => {
+                                if sync_chars.0 == SYNC_CHAR_1 {
+                                    sync_chars.1 = SYNC_CHAR_2;
+                                    buffer_slice = &buffer_slice[(i + 1)..];
+                                    state = ParseState::AwaitingClass;
+                                    flag = false;
+                                }
+                            },
+                            _ => {
+                                sync_chars.0 = 0x00;
+                                sync_chars.1 = 0x00;
+                            },
+                        }
+                        i += 1;
+                    }
+                    if flag { break; }
+                }
+
+                if state == ParseState::AwaitingClass {
+                    if buffer_slice.len() == 0 { break; }
+                    class = buffer_slice[0];
+                    buffer_slice = &buffer_slice[1..];
+                    state = ParseState::AwaitingID
+                }
+
+                if state == ParseState::AwaitingID {
+                    if buffer_slice.len() == 0 { break; }
+                    id = buffer_slice[0];
+                    buffer_slice = &buffer_slice[1..];
+                    state = ParseState::AwaitingLengthA;
+                }
+
+                if state == ParseState::AwaitingLengthA {
+                    if buffer_slice.len() == 0 { break; }
+                    length_a = buffer_slice[0];
+                    buffer_slice = &buffer_slice[1..];
+                    state = ParseState::AwaitingLengthB;
+                }
+
+                if state == ParseState::AwaitingLengthB {
+                    if buffer_slice.len() == 0 { break; }
+                    length = u16::from_le_bytes([length_a, buffer_slice[0]]);
+                    buffer_slice = &buffer_slice[1..];
+
+                    if length > MAX_PAYLOAD_LEN {
+                        tracing::warn!(
+                            target: "UBXHubReader",
+                            "Discarding UBX with absurd payload length {} (class={:#X}, id={:#X}).",
+                            length, class, id
+                        );
+                        // Reset parser.
+                        state = ParseState::AwaitingSync;
+                        sync_chars = (0x00, 0x00);
+                        payload.clear();
+                        continue;
+                    }
+
+                    state = ParseState::AwaitingPayload;
+                    payload = Vec::with_capacity(length as usize);
+                }
+
+                if state == ParseState::AwaitingPayload {
+                    if buffer_slice.is_empty() { break; }
+                    if payload.len() + buffer_slice.len()  < length.into() {
+                        payload.extend_from_slice(buffer_slice);
+                        break;
+                    } else {
+                        let cutoff = length as usize - payload.len();
+                        payload.extend_from_slice(&buffer_slice[..cutoff]);
+                        buffer_slice = &buffer_slice[cutoff..];
+                        state = ParseState::AwaitingChecksumA;
+                    }
+                }
+
+                if state == ParseState::AwaitingChecksumA {
+                    if buffer_slice.len() == 0 { break; }
+                    checksum.0 = buffer_slice[0];
+                    buffer_slice = &buffer_slice[1..];
+                    state = ParseState::AwaitingChecksumB;
+                }
+
+                if state == ParseState::AwaitingChecksumB {
+                    if buffer_slice.len() == 0 { break; }
+                    checksum.1 = buffer_slice[0];
+                    buffer_slice = &buffer_slice[1..];
+                }
+
+                // Completed packet.
+                let ubx = UBX {
+                    sync_chars,
+                    class,
+                    id,
+                    len: length,
+                    payload: std::mem::take(&mut payload),
+                    checksum,
+                };
+
+                // Typed parse + route.
+                match UBXData::process_raw_ubx(&ubx) {
+                    Ok(data) => {
+                        let arc = Arc::new(data);
+
+                        let idx = ((ubx.class as usize) << 8) | (ubx.id as usize);
+                        let route = inner.routes[idx].get_or_init(RouteHandle::new);
+                        route.publish_and_wake(arc);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "UBXHubReader",
+                            "UBX parse failed for (class={:#X}, id={:#X}): {}",
+                            ubx.class, ubx.id, e
+                        );
+                    }
+                }
+
+                // Reset parser state.
+                state = ParseState::AwaitingSync;
+                sync_chars = (0, 0);
+                checksum = (0, 0);
+                length = 0;
+                // payload was mem::take()’d; next length will reserve again.
+                
+                if buffer_slice.is_empty() { break; }
+            }
         }
     }
 }
@@ -268,8 +530,8 @@ pub enum UBXParseErr {
     #[error("The UBX packet {0:?} had a payload of size zero and could not be parsed; did you parse a poll request?")]
     ZeroPayload(UBX),
 
-    #[error("The payload was of length {payload_len:?} and should have been of length {correct_len:?} and thus could not be parsed.")]
-    InvalidPayloadLength { payload_len: usize, correct_len: usize, },
+    #[error("The payload for ({class:02X},{id:02X}) was of length {payload_len:?} and should have been of length {correct_len:?} and thus could not be parsed.")]
+    InvalidPayloadLength { payload_len: usize, correct_len: usize, class: u8, id: u8 },
 
     #[error("The provided payload was invalid: {payload_as_string}")]
     InvalidPayload { payload_as_string: String, },
@@ -300,8 +562,13 @@ pub enum UBXParseErr {
 }
 
 /// Represents the types of UBX messages that can be polled.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UBXPoll {
+    // These are “topics” you may want to await/subscribe to.
+    // (You generally don't "poll" these, but you *do* wait for them.)
+    ACKACK,
+    ACKNAK,
+
     MONRF,
 
     NAVSTATUS,
@@ -310,6 +577,7 @@ pub enum UBXPoll {
     NAVSAT,
     NAVPOSECEF,
     NAVPOSLLH,
+    NAVHPPOSLLH,
     NAVPVT,
     NAVSVIN,
     NAVRELPOSNED,
@@ -338,6 +606,9 @@ impl UBXPoll {
     /// - Returns: `(u8, u8)` which represents `(class, id)`
     pub const fn get_id_and_class(&self) -> (u8, u8) {
         match self {
+            Self::ACKACK =>           (0x05, 0x01),
+            Self::ACKNAK =>           (0x05, 0x00),
+
             Self::MONRF =>            (0x0A, 0x38),
 
             Self::NAVSTATUS =>        (0x01, 0x03),
@@ -346,6 +617,7 @@ impl UBXPoll {
             Self::NAVSAT =>           (0x01, 0x35),
             Self::NAVPOSECEF =>       (0x01, 0x01),
             Self::NAVPOSLLH =>        (0x01, 0x02),
+            Self::NAVHPPOSLLH =>      (0x01, 0x14),
             Self::NAVPVT =>           (0x01, 0x07),
             Self::NAVSVIN =>          (0x01, 0x3B),
             Self::NAVRELPOSNED =>     (0x01, 0x3C),
@@ -369,6 +641,13 @@ impl UBXPoll {
     /// Will panic if the variant is of a CFG type with a `Vec<u8>` payload
     /// and `payload.len() > u16::MAX`
     pub fn build_ubx(&self) -> UBX {
+        match self {
+            Self::ACKACK | Self::ACKNAK => {
+                panic!("UBXPoll::{:?} is a topic only (await/subscribe), not a poll request.", self);
+            }
+            _ => {}
+        }
+
         // Special pattern to catch CFG messages because they require more
         // internal structure than just an empty payload.
         match self {
@@ -465,19 +744,9 @@ impl UBXPoll {
 #[derive(Debug)]
 pub enum UBXData {
     /// Message acknoweldged (Output).
-    ACKACK {
-        /// Class ID of the Acknowledged Message.
-        class_id: u8,
-        /// Message ID of the Acknowledged Message.
-        message_id: u8,
-    },
+    ACKACK(Arc<ack::ACKACK>),
 
-    ACKNAK {
-        /// Class ID of the Not-Acknowledged Message.
-        class_id: u8,
-        /// Message ID of the Not-Acknowledged Message.
-        message_id: u8,
-    },
+    ACKNAK(Arc<ack::ACKNAK>),
 
     /// A UBX-CFG-VALGET message, specifically the second variant which is the
     /// incoming one with key-value pairs for the retrieved data.
@@ -485,45 +754,14 @@ pub enum UBXData {
     /// You will have to process the key-value pairs yourself and make meaning of them.
     /// 
     /// Usually you recieve them one at a time unless you are sending commands that need to all be applied at once.
-    CFGVALGET {
-        origin_layer: cfg::CfgLayer,
-        position: u16,
-        data: Vec<cfg::ConfigItem>,
-    },
+    CFGVALGET(Arc<cfg::CFGVALGET>),
 
     /// Information for each RF block. There are as many RF 
     /// blocks reported as bands supported by this receiver.
-    MONRF {
-        version: u8,
-        n_blocks: u8,
-        rf_blocks: Vec<mon::RFBlock>,
-    },
+    MONRF(Arc<mon::MONRF>),
 
     /// Receiver navigation status.
-    NAVSTATUS {
-        itow_timestamp: u32,
-
-        fix_type: nav::GNSSFixType,
-
-        gps_fix_ok: bool,
-        diff_soln: bool,
-        week_number_is_valid: bool,
-        time_of_week_is_valid: bool,
-
-        diff_corrections_available: bool,
-        carrier_solution_is_valid: bool,
-        map_matching: nav::MapMatchingStatus,
-
-        psm_state: nav::PowerSaveModeState,
-        spoofing_detection_state: nav::SpoofingDetectionState,
-        carrier_solution: nav::CarrierPhaseRangeSolutionStatus,
-
-        /// Time to first fix (millisecond time tag)
-        time_to_first_fix: u32,
-        /// Milliseconds since startup / reset
-        millis_since_startup: u32,
-    },
-
+    NAVSTATUS(Arc<nav::NAVSTATUS>),
 
     /// Dilution of precision.
     ///
@@ -539,16 +777,7 @@ pub enum UBXData {
     /// - `h_dop`: 0.01 (dimensionless)
     /// - `n_dop`: 0.01 (dimensionless)
     /// - `e_dop`: 0.01 (dimensionless)
-    NAVDOP {
-        itow_timestamp: u32,
-        g_dop: u16,
-        p_dop: u16,
-        t_dop: u16,
-        v_dop: u16,
-        h_dop: u16,
-        n_dop: u16,
-        e_dop: u16,
-    },
+    NAVDOP(Arc<nav::NAVDOP>),
 
     /// Signal information.
     ///
@@ -559,12 +788,7 @@ pub enum UBXData {
     /// - `itow_timestamp`: ms
     /// - `pr_residual`: 0.1 m
     /// - `cno`: dBHz
-    NAVSIG {
-        itow_timestamp: u32,
-        version: u8,
-        num_sigs: u8,
-        signals: Vec<nav::SignalInfo>,
-    },
+    NAVSIG(Arc<nav::NAVSIG>),
 
     /// Satellite information.
     ///
@@ -574,12 +798,7 @@ pub enum UBXData {
     /// - `svs[*].elevation`: deg
     /// - `svs[*].azimuth`: deg
     /// - `svs[*].pseudorange_residual`: 0.1 m
-    NAVSAT {
-        itow_timestamp: u32,
-        version: u8,
-        num_svs: u8,
-        svs: Vec<nav::SVInfo>,
-    },
+    NAVSAT(Arc<nav::NAVSAT>),
 
     /// ### Field units:
     /// - `itow_timestamp`: ms
@@ -587,13 +806,7 @@ pub enum UBXData {
     /// - `ecef_y`: cm
     /// - `ecef_z`: cm
     /// - `position_accuracy_estimate`: cm
-    NAVPOSECEF {
-        itow_timestamp: u32,
-        ecef_x: i32,
-        ecef_y: i32,
-        ecef_z: i32,
-        pos_accuracy: u32,
-    },
+    NAVPOSECEF(Arc<nav::NAVPOSECEF>),
 
     /// ### Field units:
     /// - `itow_timestamp`: ms
@@ -603,15 +816,7 @@ pub enum UBXData {
     /// - `height_msl`: mm
     /// - `horiz_acc`: mm
     /// - `verti_acc`: mm
-    NAVPOSLLH {
-        itow_timestamp: u32,
-        longitude: i32,
-        latitude: i32,
-        height: i32,
-        height_msl: i32,
-        horiz_acc: u32,
-        verti_acc: u32,
-    },
+    NAVPOSLLH(Arc<nav::NAVPOSLLH>),
 
     /// High precision geodetic position solution.
     ///
@@ -627,81 +832,13 @@ pub enum UBXData {
     /// - `height_msl_hp`: 0.1 mm
     /// - `horiz_acc`: 0.1 mm
     /// - `verti_acc`: 0.1 mm
-    NAVHPPOSLLH {
-        version: u8,
-        invalid_llh: bool,
-
-        itow_timestamp: u32,
-
-        longitude: i32,
-        latitude: i32,
-        height: i32,
-        height_msl: i32,
-
-        lon_hp: i8,
-        lat_hp: i8,
-        height_hp: i8,
-        height_msl_hp: i8,
-
-        horiz_acc: u32,
-        verti_acc: u32,
-    },
+    NAVHPPOSLLH(Arc<nav::NAVHPPOSLLH>),
 
     /// ### Field units:
     /// Look it up yourself: https://cdn.sparkfun.com/assets/f/7/4/3/5/PM-15136.pdf.
     /// 
     /// Holy fuck.
-    NAVPVT {
-        itow_timestamp: u32,
-        year: u16,
-        month: u8,
-        day: u8,
-        hour: u8,
-        min: u8,
-        sec: u8,
-
-        valid_date: bool,
-        valid_time: bool,
-        fully_resolved: bool,
-        valid_mag: bool,
-
-        time_acc: u32,
-        nano: i32,
-
-        fix_type: nav::GNSSFixType,
-
-        gnss_fix_ok: bool,
-        differential_solution: bool,
-        psm_state: nav::PowerSaveModeState,
-        heading_is_valid: bool,
-        carrier_solution: nav::CarrierPhaseRangeSolutionStatus,
-        confirmed_date: bool,
-        confirmed_time: bool,
-
-        num_satellites_used: u8,
-        latitude: i32,
-        longitude: i32,
-        height: i32,
-        height_msl: i32,
-        horiz_acc: u32,
-        verti_acc: u32,
-        velocity_north: i32,
-        velocity_east: i32,
-        velocity_down: i32,
-        ground_speed: i32,
-        heading_of_motion: i32,
-        speed_acc: u32,
-        heading_acc: u32,
-        position_dop: u16,
-
-        invalid_lon_lat_height_and_hmsl: bool,
-
-        reserved_bits_79_5: [u8; 5],
-
-        heading_of_vehicle: i32,
-        magnetic_declination: i16,
-        magnetic_declination_acc: u16, 
-    },
+    NAVPVT(Arc<nav::NAVPVT>),
 
     /// ### Survey-in Data
     /// This message contains information about survey-in parameters.
@@ -709,20 +846,7 @@ pub enum UBXData {
     /// ### Field units:
     /// 
     /// Look it up yourself: https://cdn.sparkfun.com/assets/f/7/4/3/5/PM-15136.pdf.
-    NAVSVIN {
-        itow_timestamp: u32,
-        duration: u32,
-        mean_x: i32,
-        mean_y: i32,
-        mean_z: i32,
-        mean_x_hp: i8,
-        mean_y_hp: i8,
-        mean_z_hp: i8,
-        mean_acc: u32,
-        observations_used: u32,
-        valid: bool,
-        active: bool,
-    },
+    NAVSVIN(Arc<nav::NAVSVIN>),
 
     /// Relative positioning information in NED frame.
     ///
@@ -733,7 +857,7 @@ pub enum UBXData {
     ///
     /// ### Field units:
     /// - `itow_timestamp`: ms
-    /// - `rel_pos_n`: cm
+    /// - `relrel_pos_n`: cm
     /// - `rel_pos_e`: cm
     /// - `rel_pos_d`: cm
     /// - `rel_pos_length`: cm
@@ -747,40 +871,7 @@ pub enum UBXData {
     /// - `acc_d`: 0.1 mm
     /// - `acc_length`: 0.1 mm
     /// - `acc_heading`: 1e-5 deg
-    NAVRELPOSNED {
-        version: u8,
-        ref_station_id: u16,
-        itow_timestamp: u32,
-
-        rel_pos_n: i32,
-        rel_pos_e: i32,
-        rel_pos_d: i32,
-        rel_pos_length: i32,
-        rel_pos_heading: i32,
-
-        rel_pos_hp_n: i8,
-        rel_pos_hp_e: i8,
-        rel_pos_hp_d: i8,
-        rel_pos_hp_length: i8,
-
-        acc_n: u32,
-        acc_e: u32,
-        acc_d: u32,
-        acc_length: u32,
-        acc_heading: u32,
-
-        gnss_fix_ok: bool,
-        diff_soln: bool,
-        rel_pos_valid: bool,
-        carrier_solution: nav::CarrierPhaseRangeSolutionStatus,
-        is_moving: bool,
-        ref_pos_miss: bool,
-        ref_obs_miss: bool,
-        rel_pos_heading_valid: bool,
-        rel_pos_normalized: bool,
-
-        flags_raw: u32,
-    },
+    NAVRELPOSNED(Arc<nav::NAVRELPOSNED>),
 
     /// RTCM input status.
     ///
@@ -788,24 +879,7 @@ pub enum UBXData {
     /// It is output upon successful parsing of an RTCM input
     /// message, irrespective of whether the RTCM message is
     /// supported or not by the receiver.
-    RXMRTCM {
-        /// Message version (0x02 for this version)
-        version: u8,
-
-        /// 0 when RTCM message received and passed CRC check, 1 when failed.
-        /// When CRC failed, `ref_station` and `msg_type` might be corrupted.
-        crc_failed: bool,
-        /// RTCM message used successfully by the receiver.
-        msg_used: rxm::MsgUsed,
-
-        /// Message subtype, only applicable to u-blox proprietary RTCM
-        /// message 4072 (not available on all products)
-        sub_type: u16,
-        /// Reference station ID
-        ref_station: u16,
-        /// Message type
-        msg_type: u16,
-    },
+    RXMRTCM(Arc<rxm::RXMRTCM>),
 
     /// Signal security information.
     ///
@@ -814,18 +888,7 @@ pub enum UBXData {
     ///
     /// ### Field units:
     /// - `cent_freq_khz`: kHz (floored to nearest kHz multiple)
-    SECSIG {
-        version: u8,
-
-        jam_det_enabled: bool,
-        jam_state: sec::JammingState,
-
-        spoof_det_enabled: bool,
-        spoof_state: sec::SpoofingState,
-
-        jam_num_cent_freqs: u8,
-        jam_states: Vec<sec::JamStateCentFreq>,
-    },
+    SECSIG(Arc<sec::SECSIG>),
 }
 
 /// Parses an array slice of little endian bytes into a number using that type's
@@ -865,7 +928,7 @@ impl UBXData {
             0x0D => Err(UBXParseErr::UnimplementedClass(ubx.class)), // TIM
             0x13 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // MGA
             0x21 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // LOG
-            0x27 => Err(UBXParseErr::UnimplementedClass(ubx.class)), // SEC
+            0x27 => Self::sec_packet(ubx),                           // SEC
             _ => Err(UBXParseErr::InvalidClass(ubx.class)),
         }
     }
@@ -873,7 +936,7 @@ impl UBXData {
     fn verify_payload_size(ubx: &UBX, expected_payload_size: usize) -> Result<(), UBXParseErr> {
         if ubx.payload.len() != expected_payload_size { 
             Err(UBXParseErr::InvalidPayloadLength {
-                payload_len: ubx.payload.len(), correct_len: expected_payload_size 
+                payload_len: ubx.payload.len(), correct_len: expected_payload_size, class: ubx.class, id: ubx.id,
             })
         } else {
             Ok(())
@@ -931,12 +994,47 @@ impl UBXData {
             _ => Err(UBXParseErr::UnsupportedID(ubx.id)),
         }   
     }
+
+    /// Returns the UBX (class, id) pair corresponding to this parsed message.
+    #[inline]
+    pub fn class_id(&self) -> (u8, u8) {
+        match self {
+            // ACK (0x05)
+            UBXData::ACKACK(_)          => (0x05, 0x01),
+            UBXData::ACKNAK(_)          => (0x05, 0x00),
+
+            // CFG (0x06)
+            UBXData::CFGVALGET(_)       => (0x06, 0x8B),
+
+            // MON (0x0A)
+            UBXData::MONRF(_)           => (0x0A, 0x38),
+
+            // NAV (0x01)
+            UBXData::NAVSTATUS(_)       => (0x01, 0x03),
+            UBXData::NAVDOP(_)          => (0x01, 0x04),
+            UBXData::NAVSIG(_)          => (0x01, 0x43),
+            UBXData::NAVSAT(_)          => (0x01, 0x35),
+            UBXData::NAVPOSECEF(_)      => (0x01, 0x01),
+            UBXData::NAVPOSLLH(_)       => (0x01, 0x02),
+            UBXData::NAVHPPOSLLH(_)     => (0x01, 0x14),
+            UBXData::NAVPVT(_)          => (0x01, 0x07),
+            UBXData::NAVSVIN(_)         => (0x01, 0x3B),
+            UBXData::NAVRELPOSNED(_)    => (0x01, 0x3C),
+
+            // RXM (0x02)
+            UBXData::RXMRTCM(_)         => (0x02, 0x32),
+
+            // SEC (0x27)
+            UBXData::SECSIG(_)          => (0x27, 0x09),
+        }
+    }
 }
 
 /// A simple module which handles and processes UBX-ACK-XXXX messages,
 /// the messages in the UBX-ACK class are used to indicate
 /// acknowledgement or rejection of input messages (e.g. UBX-CFG).
 pub mod ack {
+    use std::sync::Arc;
     use super::{ParseResult, UBXData, UBX};
 
     pub fn parse_ack(ubx: &UBX) -> ParseResult {
@@ -945,10 +1043,10 @@ pub mod ack {
 
         let p = &ubx.payload;
 
-        Ok(UBXData::ACKACK {
+        Ok(UBXData::ACKACK ( Arc::new( ACKACK {
             class_id: p[0],
             message_id: p[1],
-        })
+        })))
     }
 
     pub fn parse_nak(ubx: &UBX) -> ParseResult {
@@ -957,10 +1055,26 @@ pub mod ack {
 
         let p = &ubx.payload;
 
-        Ok(UBXData::ACKNAK {
+        Ok(UBXData::ACKNAK( Arc::new( ACKNAK {
             class_id: p[0],
             message_id: p[1],
-        })
+        })))
+    }
+
+    #[derive(Debug)]
+    pub struct ACKACK {
+        /// Class ID of the Acknowledged Message.
+        pub class_id: u8,
+        /// Message ID of the Acknowledged Message.
+        pub message_id: u8,
+    }
+
+    #[derive(Debug)]
+    pub struct ACKNAK {
+        /// Class ID of the Not-Acknowledged Message.
+        pub class_id: u8,
+        /// Message ID of the Not-Acknowledged Message.
+        pub message_id: u8,
     }
 }
 
@@ -968,6 +1082,8 @@ pub mod ack {
 /// Seperated for organization purposes because this codebase
 /// is enormous.
 pub mod cfg {
+    use std::sync::Arc;
+
     use super::{UBXParseErr, ParseResult, UBXData, UBX};
 
     #[repr(u8)]
@@ -995,7 +1111,7 @@ pub mod cfg {
 
     /// Represents a configuration data key-value pair, as can be sent with the 
     /// `UBX-CFG-VALSET` and `UBX-CFG-VALGET` messages.
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct ConfigItem {
         pub config_key: ConfigKey,
         pub config_val: ConfigValue,
@@ -1069,6 +1185,8 @@ pub mod cfg {
                     TmodeFixedPosAcc => U4(extract_cast_increment!(data, i, u32)),
                     TmodeSurveyInMinDuration => U4(extract_cast_increment!(data, i, u32)),
                     TmodeSurveyInAccLimit => U4(extract_cast_increment!(data, i, u32)),
+
+                    UART1BaudRate => U4(extract_cast_increment!(data, i, u32)),
                 };
 
                 config_items.push(ConfigItem { config_key: key_classification, config_val: value });
@@ -1159,12 +1277,16 @@ pub mod cfg {
         /// ### CFG-TMODE-SVIN_ACC_LIMIT (`U4`)
         /// Survey-in position accuracy limit. This will only be used if `CFG-TMODE-MODE=SURVEY_IN`.
         TmodeSurveyInAccLimit = 0x40030011,
+
+        /// ### CFG-UART1-BAUDRATE (`U4`)
+        /// The baud rate that should be configured on the UART1.
+        UART1BaudRate = 0x40520001,
     );
 
     /// Represents a configuration value, which depending on the associated configuration
     /// key, can be either a single bit (which is sent as full byte with only the least 
     /// signficant bit used), a byte, two bytes, four bytes, or eight bytes.
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum ConfigValue {
         // unsigned little-endian integers:
         U1(u8),
@@ -1235,7 +1357,7 @@ pub mod cfg {
                 payload_as_string: format!("Incoming version was invalid; version: {:02X?}, payload: {:?}", ubx.payload[0], ubx.payload)
             });
         }
-        Ok(UBXData::CFGVALGET { 
+        Ok(UBXData::CFGVALGET( Arc::new( CFGVALGET { 
             origin_layer: match CfgLayer::try_from(ubx.payload[1]) {
                 Ok(layer) => layer,
                 Err(e) => return Err(UBXParseErr::InvalidPayload { payload_as_string: 
@@ -1244,7 +1366,14 @@ pub mod cfg {
             },
             position: u16::from_be_bytes([ubx.payload[3], ubx.payload[4]]),
             data: ConfigItem::parse_config_data(&ubx.payload)? 
-        })
+        })))
+    }
+
+    #[derive(Debug)]
+    pub struct CFGVALGET {
+        pub origin_layer: CfgLayer,
+        pub position: u16,
+        pub data: Vec<ConfigItem>,
     }
 }
 
@@ -1253,6 +1382,8 @@ pub mod cfg {
 /// receiver status, such as hardware status or I/O subsystem 
 /// statistics.
 pub mod mon {
+    use std::sync::Arc;
+
     use num_enum::TryFromPrimitive;
 
     use super::{UBX, ParseResult, UBXData};
@@ -1273,53 +1404,55 @@ pub mod mon {
             rf_blocks.push(RFBlock::parse(&p[i..(i+24)]));
         }
 
-        Ok(UBXData::MONRF { version, n_blocks: p[1], rf_blocks })
+        Ok(UBXData::MONRF( Arc::new( MONRF { version, n_blocks: p[1], rf_blocks })))
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Default)]
     pub struct RFBlock {
         /// RF block ID (0 = L1 band, 1 = L2 or L5 band depending 
         /// on product configuration)
-        block_id: BlockIDBand,
+        pub block_id: BlockIDBand,
         /// Depricated in version 0x02; use UBX-SEC-SIG instead.
         /// Will always report zero in 0x02.
-        jamming_state: JammingState,
+        pub jamming_state: JammingState,
         /// Status of the antenna supervisor state machine.
-        antenna_status: AntennaStatus,
+        pub antenna_status: AntennaStatus,
         /// POST status word.
-        post_status: u32,
+        pub post_status: u32,
         /// Noise level as measured by the GPS core.
-        noise_per_ms: u16,
+        pub noise_per_ms: u16,
         /// AGC Monitor, as percentage of maximum gain, range 
         /// 0 to 8191 (100%).
-        agc_count: u16,
+        pub agc_count: u16,
         /// CW interference suppression level, scaled (0 = no CW
         /// jamming, 255 = strong CW jamming).
-        cw_suppression: u8,
+        pub cw_suppression: u8,
         /// Imbalance of I-part of complex signal, scaled (-128 = 
         /// max. negative imbalance, 127 = max. positive imbalance).
-        offset_i: i8,
+        pub offset_i: i8,
         /// Magnitude of I-part of complex signal, scaled (0 = no 
         /// signal, 255 = max.magnitude).
-        magnitude_i: u8,
+        pub magnitude_i: u8,
         /// Imbalance of Q-part of complex signal, scaled (-128 =
         /// max. negative imbalance, 127 = max. positive imbalance).
-        offset_q: i8,
+        pub offset_q: i8,
         /// Magnitude of Q-part of complex signal, scaled (0 = no 
         /// signal, 255 = max.magnitude).
-        magnitude_q: u8,
+        pub magnitude_q: u8,
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum BlockIDBand {
         L1 = 0x00,
         L2orL5 = 0x01,
+        #[default]
         Invalid = 0xFF,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Default)]
     pub enum JammingState {
+        #[default]
         Unknown,
         NoSignficantJamming,
         WarningSomeJamming,
@@ -1328,9 +1461,10 @@ pub mod mon {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum AntennaStatus {
         Init = 0x00,
+        #[default]
         DontKnow = 0x01,
         Okay = 0x02,
         Short = 0x03,
@@ -1360,19 +1494,29 @@ pub mod mon {
             }
         }
     }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct MONRF {
+        pub version: u8,
+        pub n_blocks: u8,
+        pub rf_blocks: Vec<RFBlock>,
+    }
 }
 
 /// A module which handles and processes UBX-NAV-XXXX messages,
 /// the messages in the UBX-NAV class are used to report the
 /// navigation solution and related information.
 pub mod nav {
+    use std::sync::Arc;
+
     use num_enum::TryFromPrimitive;
 
     use super::{ParseResult, UBXData, UBXParseErr, UBX};
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive, Clone)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum MapMatchingStatus {
+        #[default]
         None = 0x00,
         ValidButNotUsed = 0x01,
         ValidAndUsed = 0x02,
@@ -1381,8 +1525,9 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive, Clone)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum SpoofingDetectionState {
+        #[default]
         UnknownOrDeactivated = 0x00,
         NoSpoofingIndicated = 0x01,
         SpoofingIndicated = 0x02,
@@ -1391,8 +1536,9 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive, Clone)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum GNSSFixType {
+        #[default]
         NoFix = 0x00,
         DeadReckoningOnly = 0x01,
         Fix2D = 0x02,
@@ -1403,16 +1549,18 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, Clone, TryFromPrimitive)]
+    #[derive(Debug, Clone, TryFromPrimitive, Default)]
     pub enum CarrierPhaseRangeSolutionStatus {
+        #[default]
         NoSolution = 0x00,
         SolutionWithFloatingAmbiguities = 0x01,
         SolutionWithFixedAmbiguities = 0x02,
         Invalid = 0xFF,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Default)]
     pub enum PowerSaveModeState {
+        #[default]
         NotActive,
         Enabled,
         Acquisition,
@@ -1422,7 +1570,7 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Default, Clone)]
     pub enum GnssId {
         GPS = 0x00,
         SBAS = 0x01,
@@ -1432,12 +1580,14 @@ pub mod nav {
         QZSS = 0x05,
         GLONASS = 0x06,
         NavIC = 0x07,
+        #[default]
         Invalid = 0xFF,
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Default, Clone)]
     pub enum SignalQualityIndicator {
+        #[default]
         NoSignal = 0x00,
         SearchingSignal = 0x01,
         SignalAcquired = 0x02,
@@ -1450,8 +1600,9 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum CorrectionSource {
+        #[default]
         NoCorrections = 0x00,
         SBASCorrections = 0x01,
         BeiDouCorrections = 0x02,
@@ -1465,8 +1616,9 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum IonosphericModel {
+        #[default]
         NoModel = 0x00,
         KlobucharModelTransmittedByGPS = 0x01,
         SBASModel = 0x02,
@@ -1476,8 +1628,9 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum SignalHealth {
+        #[default]
         Unknown = 0x00,
         Healthy = 0x01,
         Unhealthy = 0x02,
@@ -1485,7 +1638,7 @@ pub mod nav {
     }
 
         #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum GNSSIdentifier {
         GPS = 0x00,
         SBAS = 0x01,
@@ -1494,12 +1647,14 @@ pub mod nav {
         IMES = 0x04,
         QZSS = 0x05,
         GLONASS = 0x06,
+        #[default]
         Invalid = 0xFF,
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum QualityIndicator {
+        #[default]
         NoSignal = 0x00,
         SearchingSignal = 0x01,
         SignalAcquired = 0x02,
@@ -1512,8 +1667,9 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum Health {
+        #[default]
         Unknown = 0x00,
         Healthy = 0x01,
         Unhealthy = 0x02,
@@ -1521,8 +1677,9 @@ pub mod nav {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum OrbitSource {
+        #[default]
         NoOrbitInfo = 0x00,
         Ephemeris = 0x01,
         Almanac = 0x02,
@@ -1538,20 +1695,20 @@ pub mod nav {
         const EXPECTED_PAYLOAD_SIZE: usize = 20;
         UBXData::verify_payload_size(ubx, EXPECTED_PAYLOAD_SIZE)?;
         
-        Ok(UBXData::NAVPOSECEF { 
+        Ok(UBXData::NAVPOSECEF( Arc::new(NAVPOSECEF { 
             itow_timestamp: parse_to!(&ubx.payload[0..4], u32), 
             ecef_x: parse_to!(&ubx.payload[4..8], i32), 
             ecef_y: parse_to!(&ubx.payload[8..12], i32), 
             ecef_z: parse_to!(&ubx.payload[12..16], i32), 
             pos_accuracy: parse_to!(&ubx.payload[16..20], u32),
-        })
+        })))
     }
 
     pub fn parse_posllh(ubx: &UBX) -> ParseResult {
         const EXPECTED_PAYLOAD_SIZE: usize = 28;
         UBXData::verify_payload_size(ubx, EXPECTED_PAYLOAD_SIZE)?;
         
-        Ok(UBXData::NAVPOSLLH { 
+        Ok(UBXData::NAVPOSLLH( Arc::new(NAVPOSLLH { 
             itow_timestamp: parse_to!(&ubx.payload[0..4], u32), 
             longitude: parse_to!(&ubx.payload[4..8], i32), 
             latitude: parse_to!(&ubx.payload[8..12], i32), 
@@ -1559,7 +1716,7 @@ pub mod nav {
             height_msl: parse_to!(&ubx.payload[16..20], i32), 
             horiz_acc:parse_to!(&ubx.payload[20..24], u32), 
             verti_acc: parse_to!(&ubx.payload[24..28], u32),
-        })
+        })))
     }
 
     pub fn parse_pvt(ubx: &UBX) -> ParseResult {
@@ -1568,7 +1725,7 @@ pub mod nav {
         
         let p = &ubx.payload;
 
-        Ok(UBXData::NAVPVT { 
+        Ok(UBXData::NAVPVT( Arc::new(NAVPVT { 
             itow_timestamp: parse_to!(&p[0..4], u32),
             year: parse_to!(&p[4..6], u16),
             month: p[6],
@@ -1672,7 +1829,7 @@ pub mod nav {
             heading_of_vehicle: parse_to!(&p[84..88], i32),
             magnetic_declination: parse_to!(&p[88..90], i16),
             magnetic_declination_acc: parse_to!(&p[90..92], u16),
-        })
+        })))
     }
 
     pub fn parse_svin(ubx: &UBX) -> ParseResult {
@@ -1681,7 +1838,7 @@ pub mod nav {
         
         let p = &ubx.payload;
 
-        Ok(UBXData::NAVSVIN { 
+        Ok(UBXData::NAVSVIN( Arc::new(NAVSVIN { 
             itow_timestamp: parse_to!(&p[4..8], u32), 
             duration: parse_to!(&p[8..12], u32), 
             mean_x: parse_to!(&p[12..16], i32), 
@@ -1694,7 +1851,7 @@ pub mod nav {
             observations_used: parse_to!(&p[32..36], u32), 
             valid: p[36] == 0x01, 
             active: p[37] == 0x01, 
-        })
+        })))
     }
 
     pub fn parse_status(ubx: &UBX) -> ParseResult {
@@ -1707,7 +1864,7 @@ pub mod nav {
         let fix_stat = p[6];
         let flags2 = p[7];
 
-        Ok(UBXData::NAVSTATUS {
+        Ok(UBXData::NAVSTATUS( Arc::new(NAVSTATUS {
             itow_timestamp: parse_to!(&p[0..4], u32),
 
             fix_type: GNSSFixType::try_from_primitive(p[4]).unwrap_or(GNSSFixType::Invalid),
@@ -1758,7 +1915,7 @@ pub mod nav {
 
             time_to_first_fix: parse_to!(&p[8..12], u32),
             millis_since_startup: parse_to!(&p[12..16], u32),
-        })
+        })))
     }
 
     pub fn parse_dop(ubx: &UBX) -> ParseResult {
@@ -1767,7 +1924,7 @@ pub mod nav {
 
         let p = &ubx.payload;
 
-        Ok(UBXData::NAVDOP {
+        Ok(UBXData::NAVDOP( Arc::new(NAVDOP {
             itow_timestamp: parse_to!(&p[0..4], u32),
             g_dop: parse_to!(&p[4..6], u16),
             p_dop: parse_to!(&p[6..8], u16),
@@ -1776,7 +1933,7 @@ pub mod nav {
             h_dop: parse_to!(&p[12..14], u16),
             n_dop: parse_to!(&p[14..16], u16),
             e_dop: parse_to!(&p[16..18], u16),
-        })
+        })))
     }
 
     pub fn parse_sig(ubx: &UBX) -> ParseResult {
@@ -1795,15 +1952,15 @@ pub mod nav {
             signals.push(SignalInfo::parse(&p[i..(i + 16)]));
         }
 
-        Ok(UBXData::NAVSIG {
+        Ok(UBXData::NAVSIG( Arc::new(NAVSIG {
             itow_timestamp: parse_to!(&p[0..4], u32),
             version,
             num_sigs: p[5],
             signals,
-        })
+        })))
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Default)]
     pub struct SignalInfo {
         /// GNSS identifier (see Satellite Numbering)
         pub gnss_id: GnssId,
@@ -1867,15 +2024,15 @@ pub mod nav {
             svs.push(SVInfo::parse(&p[i..(i + 12)]));
         }
 
-        Ok(UBXData::NAVSAT {
+        Ok(UBXData::NAVSAT( Arc::new(NAVSAT {
             itow_timestamp: parse_to!(&p[0..4], u32),
             version: p[4],
             num_svs: p[5],
             svs,
-        })
+        })))
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Default)]
     pub struct SVInfo {
         /// GNSS identifier (see Satellite Numbering for assignment).
         pub gnss_id: GNSSIdentifier,
@@ -1990,7 +2147,7 @@ pub mod nav {
 
         let p = &ubx.payload;
 
-        Ok(UBXData::NAVHPPOSLLH {
+        Ok(UBXData::NAVHPPOSLLH( Arc::new(NAVHPPOSLLH {
             version: p[0],
 
             invalid_llh: {
@@ -2011,7 +2168,7 @@ pub mod nav {
 
             horiz_acc: parse_to!(&p[28..32], u32),
             verti_acc: parse_to!(&p[32..36], u32),
-        })
+        })))
     }
 
     pub fn parse_relposned(ubx: &UBX) -> ParseResult {
@@ -2022,7 +2179,7 @@ pub mod nav {
 
         let flags_raw = parse_to!(&p[60..64], u32);
 
-        Ok(UBXData::NAVRELPOSNED {
+        Ok(UBXData::NAVRELPOSNED( Arc::new(NAVRELPOSNED {
             version: p[0],
             ref_station_id: parse_to!(&p[2..4], u16),
             itow_timestamp: parse_to!(&p[4..8], u32),
@@ -2073,7 +2230,206 @@ pub mod nav {
                 == 0b0000_0000_0000_0000_0000_0010_0000_0000,
 
             flags_raw,
-        })
+        })))
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVSTATUS {
+        pub itow_timestamp: u32,
+
+        pub fix_type: GNSSFixType,
+
+        pub gps_fix_ok: bool,
+        pub diff_soln: bool,
+        pub week_number_is_valid: bool,
+        pub time_of_week_is_valid: bool,
+
+        pub diff_corrections_available: bool,
+        pub carrier_solution_is_valid: bool,
+        pub map_matching: MapMatchingStatus,
+
+        pub psm_state: PowerSaveModeState,
+        pub spoofing_detection_state: SpoofingDetectionState,
+        pub carrier_solution: CarrierPhaseRangeSolutionStatus,
+
+        /// Time to first fix (millisecond time tag)
+        pub time_to_first_fix: u32,
+        /// Milliseconds since startup / reset
+        pub millis_since_startup: u32,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVDOP {
+        pub itow_timestamp: u32,
+        pub g_dop: u16,
+        pub p_dop: u16,
+        pub t_dop: u16,
+        pub v_dop: u16,
+        pub h_dop: u16,
+        pub n_dop: u16,
+        pub e_dop: u16,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVSIG {
+        pub itow_timestamp: u32,
+        pub version: u8,
+        pub num_sigs: u8,
+        pub signals: Vec<SignalInfo>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVSAT {
+        pub itow_timestamp: u32,
+        pub version: u8,
+        pub num_svs: u8,
+        pub svs: Vec<SVInfo>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVPOSECEF {
+        pub itow_timestamp: u32,
+        pub ecef_x: i32,
+        pub ecef_y: i32,
+        pub ecef_z: i32,
+        pub pos_accuracy: u32,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVPOSLLH {
+        pub itow_timestamp: u32,
+        pub longitude: i32,
+        pub latitude: i32,
+        pub height: i32,
+        pub height_msl: i32,
+        pub horiz_acc: u32,
+        pub verti_acc: u32,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVHPPOSLLH {
+        pub version: u8,
+        pub invalid_llh: bool,
+
+        pub itow_timestamp: u32,
+
+        pub longitude: i32,
+        pub latitude: i32,
+        pub height: i32,
+        pub height_msl: i32,
+
+        pub lon_hp: i8,
+        pub lat_hp: i8,
+        pub height_hp: i8,
+        pub height_msl_hp: i8,
+
+        pub horiz_acc: u32,
+        pub verti_acc: u32,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVPVT {
+        pub itow_timestamp: u32,
+        pub year: u16,
+        pub month: u8,
+        pub day: u8,
+        pub hour: u8,
+        pub min: u8,
+        pub sec: u8,
+
+        pub valid_date: bool,
+        pub valid_time: bool,
+        pub fully_resolved: bool,
+        pub valid_mag: bool,
+
+        pub time_acc: u32,
+        pub nano: i32,
+
+        pub fix_type: GNSSFixType,
+
+        pub gnss_fix_ok: bool,
+        pub differential_solution: bool,
+        pub psm_state: PowerSaveModeState,
+        pub heading_is_valid: bool,
+        pub carrier_solution: CarrierPhaseRangeSolutionStatus,
+        pub confirmed_date: bool,
+        pub confirmed_time: bool,
+
+        pub num_satellites_used: u8,
+        pub latitude: i32,
+        pub longitude: i32,
+        pub height: i32,
+        pub height_msl: i32,
+        pub horiz_acc: u32,
+        pub verti_acc: u32,
+        pub velocity_north: i32,
+        pub velocity_east: i32,
+        pub velocity_down: i32,
+        pub ground_speed: i32,
+        pub heading_of_motion: i32,
+        pub speed_acc: u32,
+        pub heading_acc: u32,
+        pub position_dop: u16,
+
+        pub invalid_lon_lat_height_and_hmsl: bool,
+
+        pub reserved_bits_79_5: [u8; 5],
+
+        pub heading_of_vehicle: i32,
+        pub magnetic_declination: i16,
+        pub magnetic_declination_acc: u16, 
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVSVIN {
+        pub itow_timestamp: u32,
+        pub duration: u32,
+        pub mean_x: i32,
+        pub mean_y: i32,
+        pub mean_z: i32,
+        pub mean_x_hp: i8,
+        pub mean_y_hp: i8,
+        pub mean_z_hp: i8,
+        pub mean_acc: u32,
+        pub observations_used: u32,
+        pub valid: bool,
+        pub active: bool,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct NAVRELPOSNED {
+        pub version: u8,
+        pub ref_station_id: u16,
+        pub itow_timestamp: u32,
+
+        pub rel_pos_n: i32,
+        pub rel_pos_e: i32,
+        pub rel_pos_d: i32,
+        pub rel_pos_length: i32,
+        pub rel_pos_heading: i32,
+
+        pub rel_pos_hp_n: i8,
+        pub rel_pos_hp_e: i8,
+        pub rel_pos_hp_d: i8,
+        pub rel_pos_hp_length: i8,
+
+        pub acc_n: u32,
+        pub acc_e: u32,
+        pub acc_d: u32,
+        pub acc_length: u32,
+        pub acc_heading: u32,
+
+        pub gnss_fix_ok: bool,
+        pub diff_soln: bool,
+        pub rel_pos_valid: bool,
+        pub carrier_solution: CarrierPhaseRangeSolutionStatus,
+        pub is_moving: bool,
+        pub ref_pos_miss: bool,
+        pub ref_obs_miss: bool,
+        pub rel_pos_heading_valid: bool,
+        pub rel_pos_normalized: bool,
+
+        pub flags_raw: u32,
     }
 }
 
@@ -2081,6 +2437,8 @@ pub mod nav {
 /// the messages in the UBX-RXM class are used to report raw
 /// receiver measurement and input status information.
 pub mod rxm {
+    use std::sync::Arc;
+
     use num_enum::TryFromPrimitive;
 
     use super::{ParseResult, UBXData, UBX};
@@ -2094,7 +2452,7 @@ pub mod rxm {
         let flags = p[1];
         let msg_used = (flags & 0b0000_0110) >> 1;
 
-        Ok(UBXData::RXMRTCM {
+        Ok(UBXData::RXMRTCM( Arc::new( RXMRTCM {
             version: p[0],
 
             crc_failed: flags & 0b0000_0001 == 0b0000_0001,
@@ -2103,7 +2461,7 @@ pub mod rxm {
             sub_type: parse_to!(&p[2..4], u16),
             ref_station: parse_to!(&p[4..6], u16),
             msg_type: parse_to!(&p[6..8], u16),
-        })
+        })))
     }
 
     #[repr(u8)]
@@ -2114,12 +2472,35 @@ pub mod rxm {
         UsedSuccessfully = 0x02,
         Invalid = 0xFF,
     }
+
+    
+    #[derive(Debug)]
+    pub struct RXMRTCM {
+        /// Message version (0x02 for this version)
+        pub version: u8,
+
+        /// 0 when RTCM message received and passed CRC check, 1 when failed.
+        /// When CRC failed, `ref_station` and `msg_type` might be corrupted.
+        pub crc_failed: bool,
+        /// RTCM message used successfully by the receiver.
+        pub msg_used: MsgUsed,
+
+        /// Message subtype, only applicable to u-blox proprietary RTCM
+        /// message 4072 (not available on all products)
+        pub sub_type: u16,
+        /// Reference station ID
+        pub ref_station: u16,
+        /// Message type
+        pub msg_type: u16,
+    }
 }
 
 /// A module which handles and processes UBX-SEC-XXXX messages,
 /// the messages in the UBX-SEC class are used to report security
 /// related information.
 pub mod sec {
+    use std::sync::Arc;
+
     use num_enum::TryFromPrimitive;
 
     use super::{ParseResult, UBXData, UBX};
@@ -2155,7 +2536,7 @@ pub mod sec {
             jam_states.push(JamStateCentFreq::parse(&p[i..(i + 4)]));
         }
 
-        Ok(UBXData::SECSIG {
+        Ok(UBXData::SECSIG( Arc::new( SECSIG {
             version,
 
             jam_det_enabled,
@@ -2166,12 +2547,13 @@ pub mod sec {
 
             jam_num_cent_freqs: p[3],
             jam_states,
-        })
+        })))
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum JammingState {
+        #[default]
         Unknown = 0x00,
         NoJammingIndicated = 0x01,
         WarningJammingIndicated = 0x02,
@@ -2179,8 +2561,9 @@ pub mod sec {
     }
 
     #[repr(u8)]
-    #[derive(Debug, TryFromPrimitive)]
+    #[derive(Debug, TryFromPrimitive, Clone, Default)]
     pub enum SpoofingState {
+        #[default]
         Unknown = 0x00,
         NoSpoofingIndicated = 0x01,
         SpoofingIndicated = 0x02,
@@ -2188,7 +2571,7 @@ pub mod sec {
         Invalid = 0xFF,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct JamStateCentFreq {
         /// Center frequency (kHz), floored to the nearest kHz multiple.
         pub cent_freq_khz: u32,
@@ -2209,6 +2592,20 @@ pub mod sec {
                 raw,
             }
         }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct SECSIG {
+        pub version: u8,
+
+        pub jam_det_enabled: bool,
+        pub jam_state: JammingState,
+
+        pub spoof_det_enabled: bool,
+        pub spoof_state: SpoofingState,
+
+        pub jam_num_cent_freqs: u8,
+        pub jam_states: Vec<JamStateCentFreq>,
     }
 }
 

@@ -109,7 +109,34 @@ impl<'a> DebugTerminal<'a> {
             );
 
             self.state.current_line += 1;
+
+            if self.state.current_line >= self.state.max_lines {
+                // Clear screen.
+                fast_draw::draw_rect_xrgb8888(fb, fb_data, self.rect, color::BLACK);
+                // Warn that terminal overflowed.
+                self.atlas.draw_text_on_solid_bg_xrgb8888(
+                    fb,
+                    fb_data.pitch_bytes,
+                    fb_data.width,
+                    fb_data.height,
+                    self.rect.left as isize,
+                    self.rect.top as isize + self.text_ascenders_px as isize,
+                    color::RED,
+                    color::WHITE,
+                    " ! TERMINAL OVERFLOWED ! "
+                );
+                // Move down one line.
+                self.state.current_line = 1;
+            }
         }
+    }
+    
+    pub fn set_dirty(&mut self) {
+        self.state.is_dirty = true;
+    }
+
+    pub fn clear(&mut self) {
+        self.set_dirty();
     }
 
     #[inline(always)]
