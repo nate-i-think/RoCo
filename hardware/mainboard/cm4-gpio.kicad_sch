@@ -13869,7 +13869,7 @@
 	)
 	(text "uSIM Interface\n"
 		(exclude_from_sim no)
-		(at 222.758 20.066 0)
+		(at 223.012 24.13 0)
 		(effects
 			(font
 				(size 1.27 1.27)
