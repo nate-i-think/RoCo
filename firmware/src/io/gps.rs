@@ -10,43 +10,43 @@ use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
 use super::ubx::{UBXData, UBXHub, UBXPoll};
 use super::ubx::{self, cfg::{ConfigItem, ConfigKey, ConfigValue}};
 
-pub async fn begin_survey_in(
-    serial_writer: &mut WriteHalf<SerialStream>, 
-    min_duration: Duration, 
-    accuracy_threshold: Distance, 
-) -> tokio::io::Result<()> {
-    let survey_in_frame = ubx::UBXPoll::CFGVALSET { 
-        ram: true, 
-        bbr: false, 
-        flash: false, 
-        cfg_data: vec![
-            ConfigItem { 
-                config_key: ConfigKey::TmodeMode,
-                config_val: ConfigValue::E1(0x01), // SURVEY_IN
-            },
-            ConfigItem {
-                config_key: ConfigKey::TmodeSurveyInMinDuration,
-                config_val: ConfigValue::U4(min_duration.as_secs().clamp(0, u32::MAX.into()) as u32),
-            },
-            ConfigItem {
-                config_key: ConfigKey::TmodeSurveyInAccLimit,
-                config_val: ConfigValue::U4(accuracy_threshold.to_ubx_0_1mm()),
-            }
-        ],
-    }.build_ubx().bytes();
+// pub async fn begin_survey_in(
+//     serial_writer: &mut WriteHalf<SerialStream>, 
+//     min_duration: Duration, 
+//     accuracy_threshold: Distance, 
+// ) -> tokio::io::Result<()> {
+//     let survey_in_frame = ubx::UBXPoll::CFGVALSET { 
+//         ram: true, 
+//         bbr: false, 
+//         flash: false, 
+//         cfg_data: vec![
+//             ConfigItem { 
+//                 config_key: ConfigKey::TmodeMode,
+//                 config_val: ConfigValue::E1(0x01), // SURVEY_IN
+//             },
+//             ConfigItem {
+//                 config_key: ConfigKey::TmodeSurveyInMinDuration,
+//                 config_val: ConfigValue::U4(min_duration.as_secs().clamp(0, u32::MAX.into()) as u32),
+//             },
+//             ConfigItem {
+//                 config_key: ConfigKey::TmodeSurveyInAccLimit,
+//                 config_val: ConfigValue::U4(accuracy_threshold.to_ubx_0_1mm()),
+//             }
+//         ],
+//     }.build_ubx().bytes();
 
-    serial_writer.write_all(&survey_in_frame).await?;
+//     serial_writer.write_all(&survey_in_frame).await?;
 
-    println!("[begin_survey_in] Started Survey In, which will complete at [{}]", 
-        (Local::now() + 
-            chrono::Duration::from_std(min_duration)
-                .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?
-        )
-        .format("%Y-%m-%d %H:%M:%S")
-    );
+//     println!("[begin_survey_in] Started Survey In, which will complete at [{}]", 
+//         (Local::now() + 
+//             chrono::Duration::from_std(min_duration)
+//                 .map_err(|e| Error::new(ErrorKind::InvalidInput, e))?
+//         )
+//         .format("%Y-%m-%d %H:%M:%S")
+//     );
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 // pub async fn fetch_survey_in_update(
 //     ubx_rx: &mut std::sync::mpsc::Receiver<UBX>, 

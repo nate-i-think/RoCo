@@ -1364,7 +1364,7 @@ pub mod cfg {
                     format!("Incoming layer was invalid; layer: {:02X?}, payload: {:?}", ubx.payload[1], ubx.payload)
                 }),
             },
-            position: u16::from_be_bytes([ubx.payload[3], ubx.payload[4]]),
+            position: u16::from_le_bytes([ubx.payload[3], ubx.payload[4]]),
             data: ConfigItem::parse_config_data(&ubx.payload)? 
         })))
     }
