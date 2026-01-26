@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::sync::{
-    Arc, OnceLock, Mutex,
+    Arc, Mutex,
     atomic::{AtomicU64, Ordering},
 };
+use parking_lot::RwLock;
 use tokio::io::{ReadHalf, WriteHalf, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{watch, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -60,7 +62,7 @@ impl UBX {
     }
 
     /// Returns the UBX packet as a complete Vec<u8> in the same order
-    /// it was recieved or would be sent.
+    /// it was received or would be sent.
     pub fn bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(8 + self.payload.len());
         bytes.push(self.sync_chars.0);
@@ -124,8 +126,8 @@ pub struct UBXHub {
 }
 
 struct UBXHubInner {
-    // Hot table indexed by (class<<8 | id). Lazily initialized.
-    routes: Box<[OnceLock<RouteHandle>]>,
+    // Lazily populated map from (class<<8 | id) -> RouteHandle.
+    routes: RwLock<HashMap<u16, Arc<RouteHandle>>>,
     write_tx: mpsc::Sender<WriteRequest>,
 }
 
@@ -227,7 +229,7 @@ impl UBXHub {
         let (write_tx, write_rx) = mpsc::channel::<WriteRequest>(256);
 
         let inner = Arc::new(UBXHubInner {
-            routes: (0..=u16::MAX).map(|_| OnceLock::new()).collect::<Vec<_>>().into_boxed_slice(),
+            routes: RwLock::new(HashMap::new()),
             write_tx,
         });
 
@@ -306,9 +308,21 @@ impl UBXHub {
         }
     }
 
-    fn route_for(&self, class: u8, id: u8) -> &RouteHandle {
-        let idx = ((class as usize) << 8) | (id as usize);
-        self.inner.routes[idx].get_or_init(RouteHandle::new)
+    fn route_for(&self, class: u8, id: u8) -> Arc<RouteHandle> {
+        let key = ((class as u16) << 8) | (id as u16);
+
+        // Fast path: check if route already exists (read lock).
+        {
+            let routes = self.inner.routes.read();
+            if let Some(route) = routes.get(&key) {
+                return route.clone();
+            }
+        }
+
+        // Slow path: insert new route (write lock).
+        let mut routes = self.inner.routes.write();
+        // Double-check after acquiring write lock (another task may have inserted).
+        routes.entry(key).or_insert_with(|| Arc::new(RouteHandle::new())).clone()
     }
 
     async fn writer_task(
@@ -336,7 +350,7 @@ impl UBXHub {
     /// This function may get snagged for an indefinite period of time if an 
     /// invalid packet is sent with an unreasonably large `length` field, i.e.,
     /// 0xFFFF, which is of course 65535 or u16::MAX. It would not stop
-    /// interpreting incoming data as payload data until it had recieved `length`
+    /// interpreting incoming data as payload data until it had received `length`
     /// bytes as input. A watchdog is thus recommended for unreliable connections.
     async fn receive_ubx_packets(
         mut reader: ReadHalf<SerialStream>,
@@ -377,7 +391,7 @@ impl UBXHub {
             //tokio::time::sleep(time::Duration::from_millis(10));
             let n = reader.read(&mut buffer).await?;
             if n == 0 {
-                println!("[recieve_ubx_packets]: No more serial data to parse.");
+                tracing::debug!(target: "UBXHubReader", "No more serial data to parse.");
                 return Ok(())
             }
 
@@ -496,8 +510,17 @@ impl UBXHub {
                     Ok(data) => {
                         let arc = Arc::new(data);
 
-                        let idx = ((ubx.class as usize) << 8) | (ubx.id as usize);
-                        let route = inner.routes[idx].get_or_init(RouteHandle::new);
+                        let key = ((ubx.class as u16) << 8) | (ubx.id as u16);
+                        let route = {
+                            let routes = inner.routes.read();
+                            if let Some(r) = routes.get(&key) {
+                                r.clone()
+                            } else {
+                                drop(routes);
+                                let mut routes = inner.routes.write();
+                                routes.entry(key).or_insert_with(|| Arc::new(RouteHandle::new())).clone()
+                            }
+                        };
                         route.publish_and_wake(arc);
                     }
                     Err(e) => {
@@ -636,7 +659,7 @@ impl UBXPoll {
     /// 
     /// Avoid sending more than 64 `ConfigItem`s within `cfg_data` if using
     /// a `CFGVALGET`/`CFGVALSET`/`CFGVALDEL` message as this may cause issues
-    /// within the reciever.
+    /// within the receiver.
     /// ### Panics
     /// Will panic if the variant is of a CFG type with a `Vec<u8>` payload
     /// and `payload.len() > u16::MAX`
@@ -708,10 +731,10 @@ impl UBXPoll {
         const VERSION: u8 = 0x00;
         payload.push(VERSION);
 
-        println!("ram: {ram}, bbr: {bbr}, flash: {flash}");
+        tracing::debug!(target: "UBXCfg", "CFGVALSET layers: ram={}, bbr={}, flash={}", ram, bbr, flash);
 
         let layers = (ram as u8) | ((bbr as u8) << 1) | ((flash as u8) << 2);
-        println!("layers: {:08b}", layers);
+        tracing::debug!(target: "UBXCfg", "CFGVALSET layers byte: {:08b}", layers);
         
         payload.push(layers);
         const RESERVED: u8 = 0x00;
@@ -739,7 +762,7 @@ impl UBXPoll {
     }
 }
 
-/// Represents data extracted from specific types of recieved UBX messages.
+/// Represents data extracted from specific types of received UBX messages.
 /// Uses a `UBX` struct as the source of data when building.
 #[derive(Debug)]
 pub enum UBXData {
@@ -753,7 +776,7 @@ pub enum UBXData {
     /// 
     /// You will have to process the key-value pairs yourself and make meaning of them.
     /// 
-    /// Usually you recieve them one at a time unless you are sending commands that need to all be applied at once.
+    /// Usually you receive them one at a time unless you are sending commands that need to all be applied at once.
     CFGVALGET(Arc<cfg::CFGVALGET>),
 
     /// Information for each RF block. There are as many RF 
@@ -1164,8 +1187,8 @@ pub mod cfg {
                 if (i + 4) >= data_len { return Err(UBXParseErr::InvalidCfgData { payload_as_string: format!("{:?}", data) })}
                 
                 let key: u32 = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
-                println!("parsing: {} {} {} {} into a key...", data[i], data[i + 1], data[i + 2], data[i + 3]);
-                println!("parsed key: {}, a.k.a., {:02X?}", key, key);
+                tracing::debug!(target: "UBXCfg", "Parsing key bytes: [{:02X}, {:02X}, {:02X}, {:02X}]", data[i], data[i + 1], data[i + 2], data[i + 3]);
+                tracing::debug!(target: "UBXCfg", "Parsed config key: {:#010X}", key);
                 i += 4;
                 let key_classification = ConfigKey::from_u32(key).ok_or(UBXParseErr::UnknownCfgKey(key))?;
                 use ConfigKey::*;
@@ -1315,7 +1338,7 @@ pub mod cfg {
         X4(u32),
         X8(u64),
 
-        // single-bit boolean (true = 1, false = 0), recieved/sent as a u1 but stored as a bool
+        // single-bit boolean (true = 1, false = 0), received/sent as a u1 but stored as a bool
         L(bool),
     }
 
@@ -1350,10 +1373,19 @@ pub mod cfg {
     }
 
     pub fn cfg_valget_incoming(ubx: &UBX) -> ParseResult {
-        let valid_size = ubx.payload.len() >= 9;
+        // Minimum 9 bytes: header (4) + at least one config item (4-byte key + 1-byte min value).
+        // If the receiver has nothing to report, it sends a NAK, not an empty VALGET.
+        if ubx.payload.len() < 9 {
+            return Err(UBXParseErr::InvalidPayloadLength {
+                payload_len: ubx.payload.len(),
+                correct_len: 9,
+                class: ubx.class,
+                id: ubx.id,
+            });
+        }
         const VALGET_INCOMING_VERSION: u8 = 0x01;
-        if ubx.payload[0] != VALGET_INCOMING_VERSION { 
-            return Err(UBXParseErr::InvalidPayload { 
+        if ubx.payload[0] != VALGET_INCOMING_VERSION {
+            return Err(UBXParseErr::InvalidPayload {
                 payload_as_string: format!("Incoming version was invalid; version: {:02X?}, payload: {:?}", ubx.payload[0], ubx.payload)
             });
         }
@@ -1364,7 +1396,7 @@ pub mod cfg {
                     format!("Incoming layer was invalid; layer: {:02X?}, payload: {:?}", ubx.payload[1], ubx.payload)
                 }),
             },
-            position: u16::from_le_bytes([ubx.payload[3], ubx.payload[4]]),
+            position: u16::from_le_bytes([ubx.payload[2], ubx.payload[3]]),
             data: ConfigItem::parse_config_data(&ubx.payload)? 
         })))
     }
@@ -1483,7 +1515,7 @@ pub mod mon {
                     AntennaStatus::try_from_primitive(b[2]).unwrap_or(AntennaStatus::Invalid)
                 },
                 post_status: parse_to!(&b[4..8], u32),
-                // 9–12 reserved
+                // 8–11 reserved
                 noise_per_ms: parse_to!(&b[12..14], u16),
                 agc_count: parse_to!(&b[14..16], u16),
                 cw_suppression: b[16],
@@ -1791,11 +1823,12 @@ pub mod nav {
                 let carrier_solution = (p[21] & 0b11000000) >> 6;
                 match carrier_solution {
                     0 => CarrierPhaseRangeSolutionStatus::NoSolution,
-                    1 => CarrierPhaseRangeSolutionStatus::SolutionWithFixedAmbiguities,
-                    2 => CarrierPhaseRangeSolutionStatus::SolutionWithFloatingAmbiguities,
-                    _ => return Err(UBXParseErr::InvalidData { 
+                    1 => CarrierPhaseRangeSolutionStatus::SolutionWithFloatingAmbiguities,
+                    2 => CarrierPhaseRangeSolutionStatus::SolutionWithFixedAmbiguities,
+                    _ => return Err(UBXParseErr::InvalidData {
                         reasoning: format!("NAV-PVT carrier_solution invalid: extracted carrier_solution: {}, full byte: {}", carrier_solution, p[21]).to_string(),
-                    }),                }
+                    }),
+                }
             },
             confirmed_date: {
                 p[22] & 0b01000000 == 0b01000000

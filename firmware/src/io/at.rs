@@ -16,7 +16,7 @@ pub enum AT {
     }
 }
 
-pub async fn recieve_at_data(
+pub async fn receive_at_data(
     reader: ReadHalf<SerialStream>,
     tx: mpsc::Sender<AT>,
 ) -> std::io::Result<()> {
@@ -37,7 +37,7 @@ pub async fn recieve_at_data(
         } else {
             // Check for a single-bit error:
             if (new_line ^ b'\n').count_ones() == 1 {
-                println!("[recieve_at_data]: saw a single bit error.");
+                println!("[receive_at_data]: saw a single bit error.");
                 line_buf.push(b'\n');
                 tx.send(parse_at_line(line_buf)).unwrap();
             } else {

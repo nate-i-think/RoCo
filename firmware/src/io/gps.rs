@@ -1,14 +1,12 @@
-use std::{time::Duration};
+use std::time::Duration;
 use std::sync::Arc;
 use std::ops::{Add, Sub, Mul, Div};
-use tokio::io::{Error, ErrorKind, AsyncWriteExt, WriteHalf};
-use chrono::Local;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 use tokio::time::{self, MissedTickBehavior};
-use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
+use tokio_serial::{SerialPort, SerialPortBuilderExt};
 
-use super::ubx::{UBXData, UBXHub, UBXPoll};
-use super::ubx::{self, cfg::{ConfigItem, ConfigKey, ConfigValue}};
+use super::ubx::{self, UBXData, UBXHub, UBXPoll};
 
 // pub async fn begin_survey_in(
 //     serial_writer: &mut WriteHalf<SerialStream>, 
@@ -57,11 +55,11 @@ use super::ubx::{self, cfg::{ConfigItem, ConfigKey, ConfigValue}};
 //     let timeout = ubx_rx.recv_timeout(Duration::from_secs(1));
 //     match timeout {
 //         Ok(ubx_msg) => {
-//             if !ubx_msg.is_valid() { panic!("[fetch_survey_in_update]: Recieved an invalid UBX message!") }
+//             if !ubx_msg.is_valid() { panic!("[fetch_survey_in_update]: received an invalid UBX message!") }
 //             let data = ubx::UBXData::process_raw_ubx(&ubx_msg).unwrap();
 //             match data {
 //                 ubx::UBXData::NAVSVIN { itow_timestamp, duration, mean_x, mean_y, mean_z, mean_x_hp, mean_y_hp, mean_z_hp, mean_acc, observations_used, valid, active } => {
-//                     println!("\n[fetch_survey_in_update] Survey in update recieved:");
+//                     println!("\n[fetch_survey_in_update] Survey in update received:");
 //                     println!("    ITOW:             {}", itow_timestamp);
 //                     println!("    observations:     {}", observations_used);
 //                     println!("    valid:            {}", valid);
@@ -73,7 +71,7 @@ use super::ubx::{self, cfg::{ConfigItem, ConfigKey, ConfigValue}};
 //                     println!("    mean_acc (mm):    {}", (mean_acc as f64 / 10.0));
 //                     Ok(())
 //                 },
-//                 _ => panic!("[fetch_survey_in_update]: Did not recieve proper packet type: {:?}", data),
+//                 _ => panic!("[fetch_survey_in_update]: Did not receive proper packet type: {:?}", data),
 //             }
 //         },
 //         Err(e) => {
