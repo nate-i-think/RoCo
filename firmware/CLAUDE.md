@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 RoCo is an embedded Rust app for Raspberry Pi (aarch64). It interfaces with a u-blox ZED-F9P GNSS receiver via UBX protocol and renders to an 800x480 display via DRM/KMS.
 
+The majority of the code was hand-written and validated. Be careful when making sweeping changes.
+
 ## Build
 
 Cross-compiles via WSL. **Do not use `cargo` directly on Windows—use `just`:**
@@ -34,6 +36,7 @@ Protocol specs live in `./.manuals/`:
   tracing::debug!(target: "UBXCfg", "parsing key: {:#010X}", key);
   ```
   Existing targets: `InitGNSSTask`, `GNSSPoll`, `UBXHub`, `UBXHubReader`, `UBXHubWriter`, `UBXCfg`, `DebugTerminal`, `Main`
+- **Add periods at the end of comments**
 
 ## Hardware Code
 
