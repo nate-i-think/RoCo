@@ -663,7 +663,7 @@
       },
       {
         "name": "GND",
-        "pcb_color": "rgb(128, 77, 0)",
+        "pcb_color": "rgba(128, 77, 0, 0.502)",
         "priority": 13,
         "schematic_color": "rgb(128, 77, 0)"
       },
