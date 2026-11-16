@@ -1,0 +1,11 @@
+# KiCad sources were saved on Windows with CRLF line endings and are committed
+# byte for byte. -text turns off line-ending conversion so they stay that way;
+# diffs still work.
+*.kicad_pcb -text
+*.kicad_sch -text
+
+# Binary assets
+*.png   binary
+*.3mf   binary
+*.FCStd binary
+*.zip   binary
