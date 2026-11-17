@@ -160,15 +160,16 @@ The impedance spec that went out with the gerbers ([PDF](hardware/mainboard/Manu
 
 ### Mainboard copper
 
-The routed copper layers, plotted with the board outline and seen from the top. L2 (In1.Cu) is a solid ground plane and is not shown.
+Each copper layer plotted with the board outline, seen from the top.
 
 <table>
   <tr>
     <td align="center"><a href="hardware/docs/images/copper-mainboard-F_Cu.png"><img src="hardware/docs/images/copper-mainboard-F_Cu.png" width="400" alt="F.Cu"></a><br>L1 · F.Cu</td>
-    <td align="center"><a href="hardware/docs/images/copper-mainboard-B_Cu.png"><img src="hardware/docs/images/copper-mainboard-B_Cu.png" width="400" alt="B.Cu"></a><br>L4 · B.Cu</td>
+    <td align="center"><a href="hardware/docs/images/copper-mainboard-In1_Cu.png"><img src="hardware/docs/images/copper-mainboard-In1_Cu.png" width="400" alt="In1.Cu"></a><br>L2 · In1.Cu (solid ground plane)</td>
   </tr>
   <tr>
-    <td align="center" colspan="2"><a href="hardware/docs/images/copper-mainboard-In2_Cu.png"><img src="hardware/docs/images/copper-mainboard-In2_Cu.png" width="400" alt="In2.Cu"></a><br>L3 · In2.Cu (ground, 5 V and display supplies)</td>
+    <td align="center"><a href="hardware/docs/images/copper-mainboard-In2_Cu.png"><img src="hardware/docs/images/copper-mainboard-In2_Cu.png" width="400" alt="In2.Cu"></a><br>L3 · In2.Cu (ground, 5 V and display supplies)</td>
+    <td align="center"><a href="hardware/docs/images/copper-mainboard-B_Cu.png"><img src="hardware/docs/images/copper-mainboard-B_Cu.png" width="400" alt="B.Cu"></a><br>L4 · B.Cu</td>
   </tr>
 </table>
 
