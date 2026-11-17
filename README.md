@@ -119,7 +119,7 @@ The mainboard renders went to the fab with the gerbers; the power board and butt
   <a href="hardware/docs/images/render-enclosure-proto2.png"><img src="hardware/docs/images/render-enclosure-proto2.png" width="700" alt="FreeCAD model of case prototype 2: top shell, PCB and display brackets, TPU button cover"></a>
 </p>
 
-Case prototype 2 ([`RoCo_case_prototype_2.FCStd`](hardware/enclosure/RoCo_case_prototype_2.FCStd)), with the parts in their model positions: the top shell with its GNSS antenna hood, the PCB bracket, the display bracket below it, and the TPU cover for the button panel. The 3MF print exports are in [`hardware/enclosure`](hardware/enclosure).
+Case prototype 2 ([`RoCo_case_prototype_2.FCStd`](hardware/enclosure/RoCo_case_prototype_2.FCStd)), with the parts in their model positions, display side up: the shell at the bottom, the PCB bracket, the display bracket on top, and the TPU cover for the button panel to the right. The 3MF print exports are in [`hardware/enclosure`](hardware/enclosure).
 
 ### Schematics
 
