@@ -1,6 +1,10 @@
 # RoCo
 
-Rowing telemetry computer: a Raspberry Pi CM4, RTK GNSS and LTE-M in a boat-mounted unit. KiCad boards, FreeCAD enclosure, Rust firmware.
+This is a rowing (and later industrial surveying) telemetry computer and 5mm precision GPS that I designed for my first company, Precision Metrics, over the summer of 2025.
+
+This repository is a monolith assembled by Claude to demonstrate my work. Most everything here besides its present organization was created by hand.
+
+For the boards, I used KiCad; for the enclosure, FreeCAD; and for the firmware, nothing but firmware, cross compiled for the Pi.
 
 <p align="center">
   <img src="hardware/docs/images/render-mainboard-front.png" width="780" alt="RoCo mainboard (MB1), top side, KiCad 3D render">
