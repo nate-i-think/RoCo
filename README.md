@@ -1,10 +1,14 @@
 # RoCo
 
-This is a rowing (and later industrial surveying) telemetry computer and 5mm precision GPS that I designed for my first company, Precision Metrics, over the summer of 2025.
+This is a rowing (and later industrial surveying) telemetry computer and 5mm precision GPS that I designed for my first company, Precision Metrics. I taught myself hardware and made this as my first ever project in July of 2025, approximately. It worked first try, with one minor solder job :)
 
-This repository is a monolith assembled by Claude to demonstrate my work. Most everything here besides its present organization was created by hand.
+This repository is a monolith assembled by Claude to demonstrate my work. Most everything here besides its present organization was created by hand. This was my first engineering project; you can see the improvement between the daughterboard (my first PCB) and the mainboard (my second). 
 
-For the boards, I used KiCad; for the enclosure, FreeCAD; and for the firmware, nothing but firmware, cross compiled for the Pi.
+For the boards, I used KiCad; for the enclosure, FreeCAD; and for the firmware, nothing but Rust, cross-compiled for the Pi. I recommend looking at the schematics and layout of the PCB.
+
+A thank you to Phil's Lab and all the lovely YouTube tutorials which RL'd my brain.
+
+All text and images henceforth are written and compiled by Claude to demonstrate the technical work I did.
 
 <p align="center">
   <img src="hardware/docs/images/render-mainboard-front.png" width="780" alt="RoCo mainboard (MB1), top side, KiCad 3D render">
